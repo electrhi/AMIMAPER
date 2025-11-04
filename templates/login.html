@@ -2,27 +2,20 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
-  <title>현장관리 지도</title>
+  <title>로그인 | 현장관리 지도</title>
   <link rel="stylesheet" href="/static/style.css">
-  <script src="https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=YOUR_NAVER_CLIENT_ID"></script>
-  <script src="/static/script.js" defer></script>
 </head>
 <body>
-  <header>
-    <h2>📍 현장관리 지도</h2>
-    <form id="uploadForm" enctype="multipart/form-data">
-      <input type="file" name="file" accept=".xlsx" required>
-      <button type="submit">엑셀 업로드</button>
+  <div class="login-container">
+    <h2>🔒 현장관리 시스템 로그인</h2>
+    <form method="POST">
+      <input type="text" name="username" placeholder="아이디" required>
+      <input type="password" name="password" placeholder="비밀번호" required>
+      <button type="submit">로그인</button>
     </form>
-    <button id="logout">로그아웃</button>
-  </header>
-
-  <div id="statusBoard">
-    완료: <span id="doneCount">0</span> |
-    불가: <span id="failCount">0</span> |
-    미방문: <span id="pendingCount">0</span>
+    {% if error %}
+      <p class="error">{{ error }}</p>
+    {% endif %}
   </div>
-
-  <div id="map"></div>
 </body>
 </html>
