@@ -2,20 +2,27 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
-  <title>로그인</title>
-  <style>
-    body { font-family: Arial, sans-serif; display: flex; flex-direction: column; align-items: center; margin-top: 100px; }
-    form { display: flex; flex-direction: column; width: 250px; gap: 10px; }
-    input, button { padding: 10px; font-size: 1em; }
-    button { background: #0078ff; color: white; border: none; cursor: pointer; }
-  </style>
+  <title>현장관리 지도</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=YOUR_NAVER_CLIENT_ID"></script>
+  <script src="/static/script.js" defer></script>
 </head>
 <body>
-  <h2>🔒 현장관리 로그인</h2>
-  <form method="POST" action="/login">
-    <input type="text" name="username" placeholder="아이디" required>
-    <input type="password" name="password" placeholder="비밀번호" required>
-    <button type="submit">로그인</button>
-  </form>
+  <header>
+    <h2>📍 현장관리 지도</h2>
+    <form id="uploadForm" enctype="multipart/form-data">
+      <input type="file" name="file" accept=".xlsx" required>
+      <button type="submit">엑셀 업로드</button>
+    </form>
+    <button id="logout">로그아웃</button>
+  </header>
+
+  <div id="statusBoard">
+    완료: <span id="doneCount">0</span> |
+    불가: <span id="failCount">0</span> |
+    미방문: <span id="pendingCount">0</span>
+  </div>
+
+  <div id="map"></div>
 </body>
 </html>
