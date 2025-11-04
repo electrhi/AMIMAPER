@@ -13,16 +13,13 @@ app = Flask(__name__)
 app.secret_key = "super_secret_key"
 socketio = SocketIO(app, cors_allowed_origins="*")
 
-
+# ✅ 환경 변수 불러오기
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+NAVER_CLIENT_ID = os.getenv("NAVER_CLIENT_ID")
+NAVER_CLIENT_SECRET = os.getenv("NAVER_CLIENT_SECRET")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-
-
-# ✅ 네이버 지도 API
-NAVER_CLIENT_ID = "YOUR_NAVER_ID"
-NAVER_CLIENT_SECRET = "YOUR_NAVER_SECRET"
 
 # -------------------------------------------------------------------------
 # 로그인 페이지
@@ -152,4 +149,5 @@ def logout():
 # -------------------------------------------------------------------------
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000)
+
 
