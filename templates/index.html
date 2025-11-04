@@ -4,7 +4,8 @@
   <meta charset="UTF-8">
   <title>현장관리 지도</title>
   <link rel="stylesheet" href="/static/style.css">
-  <script src="https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=YOUR_NAVER_ID"></script>
+  <script type="text/javascript"
+  src="https://openapi.map.naver.com/openapi/v3/maps.js?ncpClientId={{ naver_client_id }}"></script>
   <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
   <script src="/static/script.js" defer></script>
 </head>
@@ -21,3 +22,4 @@
   <div id="map"></div>
 </body>
 </html>
+
