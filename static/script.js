@@ -77,7 +77,12 @@ socket.on("status_updated", data => {
 });
 
 // ---------------------- 초기 로딩 ----------------------
-window.onload = () => {
+window.addEventListener("load", () => {
+  if (typeof kakao === "undefined") {
+    console.error("⚠️ Kakao SDK not loaded. Check your appkey or domain settings.");
+    return;
+  }
+
   const container = document.getElementById('map');
   const options = {
     center: new kakao.maps.LatLng(36.351, 127.385),
@@ -85,4 +90,5 @@ window.onload = () => {
   };
   map = new kakao.maps.Map(container, options);
   loadData();
-};
+});
+
