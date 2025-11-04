@@ -1,153 +1,149 @@
-from flask import Flask, render_template, request, jsonify, session, redirect, url_for
-from supabase import create_client, Client
-from flask_socketio import SocketIO, emit
-import pandas as pd
-import requests
-import urllib.parse
-import os
+import eventlet
+eventlet.monkey_patch()
 
-# Flask + SocketIO 초기화
+from flask import Flask, render_template, request, jsonify, session, redirect, url_for
+from flask_socketio import SocketIO, emit
+from supabase import create_client, Client
+import requests, json, urllib.parse, pandas as pd
+
 app = Flask(__name__)
-app.secret_key = "super_secret_key"  # 나중에 환경변수로 변경 가능
+app.secret_key = "super_secret_key"
 socketio = SocketIO(app, cors_allowed_origins="*")
 
-# Supabase 연결
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+# ✅ Supabase 설정 (Render 환경변수로 설정됨)
+SUPABASE_URL = "https://ijuxerhjqmrpjwgsfuqk.supabase.co"
+SUPABASE_KEY = "YOUR_SUPABASE_ANON_KEY"
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# 메인 페이지 (로그인 필요)
+# ✅ 네이버 지도 API
+NAVER_CLIENT_ID = "YOUR_NAVER_ID"
+NAVER_CLIENT_SECRET = "YOUR_NAVER_SECRET"
+
+# -------------------------------------------------------------------------
+# 로그인 페이지
+# -------------------------------------------------------------------------
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        username = request.form["username"]
+        password = request.form["password"]
+
+        users = supabase.table("users").select("*").eq("username", username).execute().data
+        if users and users[0]["password"] == password:
+            session["user"] = username
+            session["dataset"] = users[0]["dataset"]
+            return redirect(url_for("index"))
+        else:
+            return render_template("login.html", error="❌ 아이디 또는 비밀번호가 올바르지 않습니다.")
+    return render_template("login.html")
+
+# -------------------------------------------------------------------------
+# 지도 메인 페이지
+# -------------------------------------------------------------------------
 @app.route("/")
 def index():
     if "user" not in session:
         return redirect(url_for("login"))
-    return render_template("index.html", username=session["user"])
+    return render_template("index.html", user=session["user"])
 
-# 로그인 페이지
-@app.route("/login", methods=["GET", "POST"])
-def login():
-    if request.method == "GET":
-        return render_template("login.html")
+# -------------------------------------------------------------------------
+# Supabase에서 데이터 불러오기
+# -------------------------------------------------------------------------
+@app.route("/get_data")
+def get_data():
+    if "dataset" not in session:
+        return jsonify([])
 
-    username = request.form["username"]
-    password = request.form["password"]
+    dataset = session["dataset"]
+    rows = supabase.table("field_data").select("*").eq("dataset", dataset).execute().data
+    results = []
 
-    user = (
-        supabase.table("users")
-        .select("*")
-        .eq("username", username)
-        .eq("password", password)
-        .execute()
-    )
+    for item in rows:
+        address = item.get("address")
+        postal_code = item.get("postal_code")
+        status = item.get("status", "미방문")
+        x, y = item.get("x"), item.get("y")
 
-    if len(user.data) > 0:
-        session["user"] = username
-        session["dataset"] = user.data[0]["dataset"]
-        return redirect(url_for("index"))
-    else:
-        return "❌ 아이디 또는 비밀번호가 잘못되었습니다.", 401
+        # ✅ meters 처리 (쉼표 또는 JSON 자동 변환)
+        raw_meters = item.get("meters")
+        meters = []
+        if isinstance(raw_meters, str):
+            try:
+                if raw_meters.startswith("["):
+                    meters = json.loads(raw_meters)
+                else:
+                    meters = [m.strip() for m in raw_meters.split(",") if m.strip()]
+            except Exception:
+                meters = [raw_meters]
+        elif isinstance(raw_meters, list):
+            meters = raw_meters
+        else:
+            meters = []
 
+        # ✅ 좌표가 없는 경우, 네이버 지오코딩 호출
+        if not x or not y:
+            encoded = urllib.parse.quote(address)
+            url = f"https://maps.apigw.ntruss.com/map-geocode/v2/geocode?query={encoded}"
+            headers = {
+                "x-ncp-apigw-api-key-id": NAVER_CLIENT_ID,
+                "x-ncp-apigw-api-key": NAVER_CLIENT_SECRET,
+                "Accept": "application/json"
+            }
+            res = requests.get(url, headers=headers)
+            if res.status_code == 200:
+                data = res.json()
+                if data.get("addresses"):
+                    addr = data["addresses"][0]
+                    x, y = float(addr["x"]), float(addr["y"])
+                    postal_code = next(
+                        (e["longName"] for e in addr["addressElements"] if "POSTAL_CODE" in e["types"]), None
+                    )
+                    supabase.table("field_data").update({
+                        "x": x, "y": y, "postal_code": postal_code
+                    }).eq("id", item["id"]).execute()
+
+        results.append({
+            "id": item["id"],
+            "dataset": dataset,
+            "postal_code": postal_code,
+            "address": address,
+            "meters": meters,
+            "x": x,
+            "y": y,
+            "status": status
+        })
+    return jsonify(results)
+
+# -------------------------------------------------------------------------
+# 마커 상태 업데이트
+# -------------------------------------------------------------------------
+@app.route("/update_status", methods=["POST"])
+def update_status():
+    data = request.json
+    dataset = session.get("dataset")
+    postal_code = data["postal_code"]
+    new_status = data["status"]
+
+    # ✅ 동일 우편번호 전체 변경
+    supabase.table("field_data").update({"status": new_status}).eq("dataset", dataset).eq("postal_code", postal_code).execute()
+
+    socketio.emit("status_updated", {
+        "postal_code": postal_code,
+        "status": new_status
+    }, broadcast=True)
+
+    return jsonify({"message": "ok"})
+
+# -------------------------------------------------------------------------
 # 로그아웃
+# -------------------------------------------------------------------------
 @app.route("/logout")
 def logout():
     session.clear()
     return redirect(url_for("login"))
 
-# Supabase → 지도 데이터 로드
-@app.route("/get_data")
-def get_data():
-    if "user" not in session:
-        return redirect(url_for("login"))
-
-    dataset = session["dataset"]
-    data = supabase.table("field_data").select("*").eq("dataset", dataset).execute()
-    return jsonify(data.data)
-
-# 상태 변경 API (마커 버튼 클릭)
-@app.route("/update_status", methods=["POST"])
-def update_status():
-    if "user" not in session:
-        return jsonify({"error": "Unauthorized"}), 403
-
-    dataset = session["dataset"]
-    postal_code = request.json["postal_code"]
-    new_status = request.json["status"]
-
-    supabase.table("field_data").update({"status": new_status})\
-        .eq("dataset", dataset)\
-        .eq("postal_code", postal_code)\
-        .execute()
-
-    # 실시간 전송
-    socketio.emit("status_update", {"postal_code": postal_code, "status": new_status}, broadcast=True)
-    return jsonify({"success": True})
-
-# 엑셀 업로드 → Supabase에 저장
-@app.route("/upload", methods=["POST"])
-def upload():
-    if "user" not in session:
-        return jsonify({"error": "Unauthorized"}), 403
-
-    file = request.files["file"]
-    df = pd.read_excel(file)
-    dataset = session["dataset"]
-
-    for _, row in df.iterrows():
-        address = str(row["주소"])
-        meter = str(row["계기번호"])
-
-        encoded_address = urllib.parse.quote(address)
-        url = f"https://maps.apigw.ntruss.com/map-geocode/v2/geocode?query={encoded_address}"
-        headers = {
-            "x-ncp-apigw-api-key-id": os.getenv("NAVER_CLIENT_ID"),
-            "x-ncp-apigw-api-key": os.getenv("NAVER_CLIENT_SECRET"),
-            "Accept": "application/json"
-        }
-
-        res = requests.get(url, headers=headers)
-        if res.status_code == 200:
-            data = res.json()
-            if data.get("addresses"):
-                addr = data["addresses"][0]
-                x, y = float(addr["x"]), float(addr["y"])
-
-                postal_code = None
-                for e in addr.get("addressElements", []):
-                    if "POSTAL_CODE" in e["types"]:
-                        postal_code = e["longName"]
-                        break
-                if not postal_code:
-                    postal_code = f"LOC_{round(x,4)}_{round(y,4)}"
-
-                # 기존 주소 그룹 확인
-                existing = (
-                    supabase.table("field_data")
-                    .select("*")
-                    .eq("dataset", dataset)
-                    .eq("postal_code", postal_code)
-                    .execute()
-                )
-
-                if existing.data:
-                    meters = existing.data[0]["meters"]
-                    meters.append(meter)
-                    supabase.table("field_data").update({"meters": meters})\
-                        .eq("dataset", dataset)\
-                        .eq("postal_code", postal_code)\
-                        .execute()
-                else:
-                    supabase.table("field_data").insert({
-                        "dataset": dataset,
-                        "postal_code": postal_code,
-                        "address": addr.get("roadAddress") or addr.get("jibunAddress") or address,
-                        "meters": [meter],
-                        "x": x,
-                        "y": y,
-                        "status": "미방문"
-                    }).execute()
-
-    return jsonify({"success": True})
-
-# 소켓 서버 실행
+# -------------------------------------------------------------------------
+# 서버 시작
+# -------------------------------------------------------------------------
 if __name__ == "__main__":
-    socketio.run(app, host="0.0.0.0", port=10000)
+    socketio.run(app, host="0.0.0.0", port=5000)
