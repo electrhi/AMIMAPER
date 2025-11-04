@@ -4,11 +4,13 @@
   <meta charset="UTF-8">
   <title>현장관리 지도</title>
   <link rel="stylesheet" href="/static/style.css">
-  <!-- ✅ 신규 Maps JS API 주소 -->
-  <script
+
+  <!-- ✅ Kakao Maps JS SDK -->
+  <script 
     type="text/javascript"
-    src="https://oapi.map.naver.com/openapi/v3/maps.js?ncpClientId={{ naver_client_id }}">
+    src="//dapi.kakao.com/v2/maps/sdk.js?appkey={{ kakao_api_key }}">
   </script>
+
   <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
   <script src="/static/script.js" defer></script>
 </head>
@@ -16,7 +18,9 @@
   <header>
     <h2>📍 현장관리 지도</h2>
     <div id="statusBoard">
-      완료: <span id="doneCount">0</span> | 불가: <span id="failCount">0</span> | 미방문: <span id="pendingCount">0</span>
+      완료: <span id="doneCount">0</span> | 
+      불가: <span id="failCount">0</span> | 
+      미방문: <span id="pendingCount">0</span>
     </div>
     <a href="/logout" class="logout-btn">로그아웃</a>
   </header>
