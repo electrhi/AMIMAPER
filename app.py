@@ -1,29 +1,30 @@
+import os
+import json
+import urllib.parse
+import requests
 import eventlet
 eventlet.monkey_patch()
 
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
-from flask_socketio import SocketIO, emit
-from supabase import create_client, Client
-import requests, json, urllib.parse, pandas as pd
-
-import os
+from flask_socketio import SocketIO
 from supabase import create_client, Client
 
 app = Flask(__name__)
-app.secret_key = "super_secret_key"
+app.secret_key = os.getenv("FLASK_SECRET", "super_secret_key")
 socketio = SocketIO(app, cors_allowed_origins="*")
 
-# ✅ 환경 변수 불러오기
+# env
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 NAVER_CLIENT_ID = os.getenv("NAVER_CLIENT_ID")
 NAVER_CLIENT_SECRET = os.getenv("NAVER_CLIENT_SECRET")
 
+if not SUPABASE_URL or not SUPABASE_KEY:
+    raise RuntimeError("❌ SUPABASE_URL 또는 SUPABASE_KEY 환경변수가 설정되지 않았습니다.")
+
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# -------------------------------------------------------------------------
-# 로그인 페이지
-# -------------------------------------------------------------------------
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
@@ -31,26 +32,26 @@ def login():
         password = request.form["password"]
 
         users = supabase.table("users").select("*").eq("username", username).execute().data
-        if users and users[0]["password"] == password:
+        # NOTE: 데모용 평문 비교
+        if users and users[0].get("password") == password:
             session["user"] = username
-            session["dataset"] = users[0]["dataset"]
+            session["dataset"] = users[0].get("dataset")
             return redirect(url_for("index"))
-        else:
-            return render_template("login.html", error="❌ 아이디 또는 비밀번호가 올바르지 않습니다.")
+        return render_template("login.html", error="❌ 아이디 또는 비밀번호가 올바르지 않습니다.")
     return render_template("login.html")
 
-# -------------------------------------------------------------------------
-# 지도 메인 페이지
-# -------------------------------------------------------------------------
+
 @app.route("/")
 def index():
     if "user" not in session:
         return redirect(url_for("login"))
-    return render_template("index.html", user=session["user"])
+    return render_template(
+        "index.html",
+        user=session["user"],
+        naver_client_id=NAVER_CLIENT_ID,
+    )
 
-# -------------------------------------------------------------------------
-# Supabase에서 데이터 불러오기
-# -------------------------------------------------------------------------
+
 @app.route("/get_data")
 def get_data():
     if "dataset" not in session:
@@ -66,33 +67,32 @@ def get_data():
         status = item.get("status", "미방문")
         x, y = item.get("x"), item.get("y")
 
-        # ✅ meters 처리 (쉼표 또는 JSON 자동 변환)
+        # meters 파싱
         raw_meters = item.get("meters")
         meters = []
-        if isinstance(raw_meters, str):
+        if isinstance(raw_meters, list):
+            meters = raw_meters
+        elif isinstance(raw_meters, str) and raw_meters.strip():
             try:
-                if raw_meters.startswith("["):
+                if raw_meters.strip().startswith("["):
                     meters = json.loads(raw_meters)
                 else:
                     meters = [m.strip() for m in raw_meters.split(",") if m.strip()]
             except Exception:
                 meters = [raw_meters]
-        elif isinstance(raw_meters, list):
-            meters = raw_meters
-        else:
-            meters = []
 
-        # ✅ 좌표가 없는 경우, 네이버 지오코딩 호출
-        if not x or not y:
-            encoded = urllib.parse.quote(address)
-            url = f"https://maps.apigw.ntruss.com/map-geocode/v2/geocode?query={encoded}"
-            headers = {
-                "x-ncp-apigw-api-key-id": NAVER_CLIENT_ID,
-                "x-ncp-apigw-api-key": NAVER_CLIENT_SECRET,
-                "Accept": "application/json"
-            }
-            res = requests.get(url, headers=headers)
-            if res.status_code == 200:
+        # 좌표 없으면 네이버 지오코딩
+        if address and (not x or not y):
+            try:
+                encoded = urllib.parse.quote(address)
+                url = f"https://maps.apigw.ntruss.com/map-geocode/v2/geocode?query={encoded}"
+                headers = {
+                    "x-ncp-apigw-api-key-id": NAVER_CLIENT_ID,
+                    "x-ncp-apigw-api-key": NAVER_CLIENT_SECRET,
+                    "Accept": "application/json"
+                }
+                res = requests.get(url, headers=headers, timeout=5)
+                res.raise_for_status()
                 data = res.json()
                 if data.get("addresses"):
                     addr = data["addresses"][0]
@@ -103,6 +103,8 @@ def get_data():
                     supabase.table("field_data").update({
                         "x": x, "y": y, "postal_code": postal_code
                     }).eq("id", item["id"]).execute()
+            except Exception as e:
+                print("geocoding error:", e)
 
         results.append({
             "id": item["id"],
@@ -116,9 +118,7 @@ def get_data():
         })
     return jsonify(results)
 
-# -------------------------------------------------------------------------
-# 마커 상태 업데이트
-# -------------------------------------------------------------------------
+
 @app.route("/update_status", methods=["POST"])
 def update_status():
     data = request.json
@@ -126,8 +126,8 @@ def update_status():
     postal_code = data["postal_code"]
     new_status = data["status"]
 
-    # ✅ 동일 우편번호 전체 변경
-    supabase.table("field_data").update({"status": new_status}).eq("dataset", dataset).eq("postal_code", postal_code).execute()
+    supabase.table("field_data").update({"status": new_status}) \
+        .eq("dataset", dataset).eq("postal_code", postal_code).execute()
 
     socketio.emit("status_updated", {
         "postal_code": postal_code,
@@ -136,18 +136,12 @@ def update_status():
 
     return jsonify({"message": "ok"})
 
-# -------------------------------------------------------------------------
-# 로그아웃
-# -------------------------------------------------------------------------
+
 @app.route("/logout")
 def logout():
     session.clear()
     return redirect(url_for("login"))
 
-# -------------------------------------------------------------------------
-# 서버 시작
-# -------------------------------------------------------------------------
+
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000)
-
-
