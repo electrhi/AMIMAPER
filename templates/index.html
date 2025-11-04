@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>현장관리 지도</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <script src="https://openapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=👉네이버_KEY👈"></script>
+  <script src="/static/script.js" defer></script>
+</head>
+<body>
+  <h2>📍 현장관리 시스템</h2>
+
+  <form id="uploadForm" enctype="multipart/form-data">
+    <input type="file" name="file" accept=".xlsx" required>
+    <button type="submit">엑셀 업로드</button>
+  </form>
+
+  <div id="statusBoard">
+    <span id="doneCount">완료: 0</span>
+    <span id="failCount">불가: 0</span>
+    <span id="pendingCount">미방문: 0</span>
+  </div>
+
+  <div id="map"></div>
+</body>
+</html>
