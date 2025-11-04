@@ -1,92 +1,70 @@
-const socket = io();
-let map, infowindow, markers = [];
+let map;
+let markers = [];
+let markerData = [];
 
-window.onload = async () => {
-  const mapOptions = { center: new naver.maps.LatLng(36.35, 127.38), zoom: 11 };
-  map = new naver.maps.Map("map", mapOptions);
-  infowindow = new naver.maps.InfoWindow({ disableAnchor: true });
+async function loadData() {
+  const res = await fetch('/get_data');
+  markerData = await res.json();
+  renderMarkers();
+}
 
-  const res = await fetch("/get_data");
-  const data = await res.json();
+function renderMarkers() {
+  markerData.forEach((item, index) => {
+    const position = new naver.maps.LatLng(item.y, item.x);
+    const count = item.meters.length;
+    const color =
+      item.status === "완료" ? "#4caf50" :
+      item.status === "불가" ? "#f44336" : "#2196f3";
 
-  data.forEach((loc) => {
-    const count = loc.meter.split(",").length;
-    const colorClass =
-      loc.status === "완료"
-        ? "marker-done"
-        : loc.status === "불가"
-        ? "marker-fail"
-        : "marker-pending";
+    const markerHtml = `
+      <div style="background:${color}; color:white; border-radius:50%; width:30px; height:30px; display:flex; align-items:center; justify-content:center;">
+        ${count}
+      </div>`;
 
     const marker = new naver.maps.Marker({
-      position: new naver.maps.LatLng(loc.y, loc.x),
+      position,
       map,
       icon: {
-        content: `<div class="marker ${colorClass}"><span>1</span></div>`,
+        content: markerHtml,
         anchor: new naver.maps.Point(15, 15),
       },
     });
 
-    marker.postal_code = loc.postal_code;
-    marker.status = loc.status;
+    const infoHtml = `
+      <div style="background:white; padding:10px; border-radius:8px;">
+        <b>${item.address}</b><br>
+        ${item.meters.map(m => `<div>${m}</div>`).join("")}
+        <div style="margin-top:10px;">
+          <button class="complete" onclick="updateStatus('${item.postal_code}', '완료')">완료</button>
+          <button class="fail" onclick="updateStatus('${item.postal_code}', '불가')">불가</button>
+          <button class="pending" onclick="updateStatus('${item.postal_code}', '미방문')">미방문</button>
+        </div>
+      </div>`;
 
+    const infoWindow = new naver.maps.InfoWindow({ content: infoHtml });
     naver.maps.Event.addListener(marker, "click", () => {
-      const html = `
-        <div class="info-popup">
-          <h4>${loc.address}</h4>
-          <div class="btn-group">
-            <button class="btn-done">완료</button>
-            <button class="btn-fail">불가</button>
-            <button class="btn-pending">미방문</button>
-          </div>
-        </div>`;
-      infowindow.setContent(html);
-      infowindow.open(map, marker);
-      setTimeout(() => attachButtonEvents(marker), 100);
+      infoWindow.open(map, marker);
     });
 
     markers.push(marker);
   });
-
-  socket.on("status_updated", (data) => {
-    const marker = markers.find((m) => m.postal_code === data.postal_code);
-    if (marker) changeMarkerStatus(marker, data.status, false);
-  });
-};
-
-function attachButtonEvents(marker) {
-  document.querySelector(".btn-done")?.addEventListener("click", () => {
-    changeMarkerStatus(marker, "완료", true);
-  });
-  document.querySelector(".btn-fail")?.addEventListener("click", () => {
-    changeMarkerStatus(marker, "불가", true);
-  });
-  document.querySelector(".btn-pending")?.addEventListener("click", () => {
-    changeMarkerStatus(marker, "미방문", true);
-  });
 }
 
-function changeMarkerStatus(marker, newStatus, notifyServer) {
-  const colorClass =
-    newStatus === "완료"
-      ? "marker-done"
-      : newStatus === "불가"
-      ? "marker-fail"
-      : "marker-pending";
-
-  marker.setIcon({
-    content: `<div class="marker ${colorClass}"><span>1</span></div>`,
-    anchor: new naver.maps.Point(15, 15),
+async function updateStatus(postal, status) {
+  await fetch('/update_status', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ postal_code: postal, status })
   });
-
-  if (notifyServer) {
-    fetch("/update_status", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        postal_code: marker.postal_code,
-        status: newStatus,
-      }),
-    });
-  }
+  await loadData();
 }
+
+function initMap() {
+  map = new naver.maps.Map('map', {
+    center: new naver.maps.LatLng(36.35, 127.38),
+    zoom: 13,
+  });
+  loadData();
+}
+
+window.onload = initMap;
