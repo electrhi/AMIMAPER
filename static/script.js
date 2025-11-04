@@ -3,6 +3,50 @@ let map;
 let markers = [];
 let markerData = [];
 
+
+// ✅ Kakao SDK Debug Helper
+(function() {
+  console.log("🧭 [Kakao SDK Debug] Checking environment...");
+
+  // 1. SDK 스크립트 태그가 존재하는지 확인
+  const kakaoScript = Array.from(document.getElementsByTagName("script"))
+    .find(s => s.src.includes("dapi.kakao.com/v2/maps/sdk.js"));
+
+  if (!kakaoScript) {
+    console.error("❌ Kakao Maps SDK script not found in HTML.");
+    console.info("👉 index.html에 다음 코드가 있는지 확인하세요:");
+    console.info('<script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=YOUR_KEY"></script>');
+    return;
+  }
+
+  // 2. appkey 값이 들어가 있는지 확인
+  const appkeyMatch = kakaoScript.src.match(/appkey=([^&]+)/);
+  if (!appkeyMatch || !appkeyMatch[1]) {
+    console.error("❌ Kakao Maps SDK appkey missing or empty.");
+    console.info("👉 Flask에서 {{ kakao_api_key }} 값이 전달되지 않았을 가능성이 높습니다.");
+    console.info("환경변수 KAKAO_API_KEY가 올바른지, Render 환경변수 설정을 확인하세요.");
+    return;
+  }
+
+  console.log(`✅ Found SDK script tag with appkey: ${appkeyMatch[1]}`);
+
+  // 3. SDK 객체 로드 확인
+  setTimeout(() => {
+    if (typeof kakao === "undefined") {
+      console.error("❌ Kakao SDK not loaded in window.");
+      console.info("👉 가능한 원인:");
+      console.info("1️⃣ 카카오 개발자센터에서 도메인 등록이 안 되어 있음");
+      console.info("2️⃣ appkey 오타 (JavaScript 키인지 확인)");
+      console.info("3️⃣ http:// 대신 https:// 필요");
+      console.info("4️⃣ 네트워크 차단 또는 CSP 정책");
+    } else {
+      console.log("✅ Kakao SDK successfully loaded!");
+      console.log("🗺️ Kakao Maps version check:", kakao.maps ? "OK" : "maps module missing");
+    }
+  }, 1000);
+})();
+
+
 // ---------------------- 데이터 로드 ----------------------
 async function loadData() {
   const res = await fetch('/get_data');
@@ -91,4 +135,5 @@ window.addEventListener("load", () => {
   map = new kakao.maps.Map(container, options);
   loadData();
 });
+
 
