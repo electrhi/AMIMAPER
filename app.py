@@ -6,14 +6,19 @@ from flask_socketio import SocketIO, emit
 from supabase import create_client, Client
 import requests, json, urllib.parse, pandas as pd
 
+import os
+from supabase import create_client, Client
+
 app = Flask(__name__)
 app.secret_key = "super_secret_key"
 socketio = SocketIO(app, cors_allowed_origins="*")
 
-# ✅ Supabase 설정 (Render 환경변수로 설정됨)
-SUPABASE_URL = "https://ijuxerhjqmrpjwgsfuqk.supabase.co"
-SUPABASE_KEY = "YOUR_SUPABASE_ANON_KEY"
+
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
 
 # ✅ 네이버 지도 API
 NAVER_CLIENT_ID = "YOUR_NAVER_ID"
@@ -147,3 +152,4 @@ def logout():
 # -------------------------------------------------------------------------
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000)
+
