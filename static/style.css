@@ -9,17 +9,6 @@ header { display: flex; justify-content: space-between; align-items: center; pad
 .login-container button:hover { background: #1565c0; }
 .error { color: red; text-align: center; }
 
-.status-btn {
-  margin: 2px;
-  padding: 5px 8px;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-}
-.status-btn:hover {
-  opacity: 0.8;
-}
-
 .popup-overlay {
   position: relative;
   background: white;
@@ -27,12 +16,13 @@ header { display: flex; justify-content: space-between; align-items: center; pad
   border-radius: 8px;
   width: 200px;
   padding: 10px;
-  pointer-events: auto;
   z-index: 9999;
+  pointer-events: auto !important; /* ✅ 꼭 추가 */
 }
+
 .status-btn {
   margin: 3px;
-  padding: 5px 8px;
+  padding: 6px 10px;
   border: none;
   border-radius: 4px;
   cursor: pointer;
