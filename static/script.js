@@ -4,6 +4,17 @@ let markerData = [];
 let overlays = [];
 let activeOverlay = null;
 
+// ---------------------- 지도 초기화 ----------------------
+function initMap() {
+  console.log("🗺️ 지도 초기화 중...");
+  const container = document.getElementById('map');
+  const options = { center: new kakao.maps.LatLng(37.5665, 126.9780), level: 5 };
+  map = new kakao.maps.Map(container, options);
+
+  addMapClickListener();
+  loadData();
+}
+
 // ---------------------- 데이터 로드 ----------------------
 async function loadData() {
   console.log("📡 서버에서 데이터 로드 중...");
@@ -77,7 +88,7 @@ function onMarkerClick(postal) {
         border:1px solid #ccc;
         border-radius:8px;
         width:200px;
-        pointer-events:auto; /* ✅ 버튼 클릭 가능하게 설정 */
+        pointer-events:auto;
       ">
       <b>계기번호:</b><br>${target.meters.join("<br>")}
       <hr>
@@ -107,11 +118,9 @@ async function changeStatus(postal, status) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ postal_code: postal, status })
   });
-
   const result = await res.json();
   console.log("✅ 서버 응답:", result);
 
-  // 상태를 로컬에서도 즉시 갱신
   markerData.forEach(m => {
     if (m.postal_code === postal) m.status = status;
   });
@@ -138,12 +147,3 @@ function addMapClickListener() {
     if (activeOverlay) activeOverlay.setMap(null);
   });
 }
-
-// ---------------------- 초기화 ----------------------
-window.addEventListener("load", () => {
-  const container = document.getElementById('map');
-  const options = { center: new kakao.maps.LatLng(37.5665, 126.9780), level: 5 };
-  map = new kakao.maps.Map(container, options);
-  addMapClickListener();
-  loadData();
-});
