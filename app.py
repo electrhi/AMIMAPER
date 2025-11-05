@@ -20,6 +20,7 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 KAKAO_API_KEY = os.getenv("KAKAO_API_KEY")
+
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # -------------------------------------------------------------------------
@@ -63,7 +64,7 @@ def get_data():
     return jsonify(rows)
 
 # -------------------------------------------------------------------------
-# 상태 업데이트
+# 상태 업데이트 (동일 우편번호 일괄처리)
 # -------------------------------------------------------------------------
 @app.route("/update_status", methods=["POST"])
 def update_status():
@@ -79,7 +80,7 @@ def update_status():
     return jsonify({"message": "ok"})
 
 # -------------------------------------------------------------------------
-# 엑셀 업로드 페이지
+# 엑셀 업로드 (주소 + 계기번호 자동 감지)
 # -------------------------------------------------------------------------
 @app.route("/upload", methods=["GET", "POST"])
 def upload():
@@ -91,14 +92,14 @@ def upload():
         if not file:
             return render_template("upload.html", error="⚠️ 파일이 선택되지 않았습니다.")
 
+        # 확장자에 따라 판다스로 읽기
         df = pd.read_excel(file) if file.filename.endswith(".xlsx") else pd.read_csv(file)
 
-        # 엑셀 컬럼명 가정: address / meters
         dataset = session["dataset"]
         inserted = 0
 
         for _, row in df.iterrows():
-        # 엑셀 열 이름 자동 감지
+            # ✅ 한글/영문 컬럼명 자동 인식
             address = (
                 str(row.get("address")
                     or row.get("주소")
@@ -109,15 +110,15 @@ def upload():
             meter = (
                 str(row.get("meters")
                     or row.get("계기번호")
-                    or row.get("Meter", "")
+                    or row.get("Meter")
+                    or row.get("계기", "")
                 ).strip()
             )
 
-        if not address:
-            continue
+            if not address:
+                continue
 
-
-            # Kakao Local API 요청
+            # ✅ Kakao Local API (주소 → 좌표)
             url = f"https://dapi.kakao.com/v2/local/search/address.json?query={urllib.parse.quote(address)}"
             headers = {"Authorization": f"KakaoAK {KAKAO_API_KEY}"}
             res = requests.get(url, headers=headers)
@@ -128,11 +129,11 @@ def upload():
                 x, y = float(loc["x"]), float(loc["y"])
                 postal_code = loc.get("road_address", {}).get("zone_no") if loc.get("road_address") else None
 
-                # Supabase 저장
+                # ✅ Supabase 저장
                 supabase.table("field_data").insert({
                     "dataset": dataset,
                     "address": address,
-                    "meters": [str(row.get("meters", ""))],
+                    "meters": [meter],
                     "x": x,
                     "y": y,
                     "postal_code": postal_code,
@@ -156,4 +157,3 @@ def logout():
 # -------------------------------------------------------------------------
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000)
-
