@@ -98,9 +98,24 @@ def upload():
         inserted = 0
 
         for _, row in df.iterrows():
-            address = str(row.get("address", "")).strip()
-            if not address:
-                continue
+        # 엑셀 열 이름 자동 감지
+            address = (
+                str(row.get("address")
+                    or row.get("주소")
+                    or row.get("Address")
+                    or row.get("주소지", "")
+                ).strip()
+            )
+            meter = (
+                str(row.get("meters")
+                    or row.get("계기번호")
+                    or row.get("Meter", "")
+                ).strip()
+            )
+
+        if not address:
+            continue
+
 
             # Kakao Local API 요청
             url = f"https://dapi.kakao.com/v2/local/search/address.json?query={urllib.parse.quote(address)}"
@@ -141,3 +156,4 @@ def logout():
 # -------------------------------------------------------------------------
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000)
+
