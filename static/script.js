@@ -18,7 +18,7 @@ function initMap() {
 // ---------------------- 데이터 로드 ----------------------
 async function loadData() {
   console.log("📡 서버에서 데이터 로드 중...");
-  const res = await fetch('/get_data');
+  const res = await fetch('/get_data', { credentials: 'include' });
   markerData = await res.json();
   console.log("✅ 데이터 수신 완료:", markerData.length, "건");
   updateMap();
@@ -81,16 +81,9 @@ function onMarkerClick(postal) {
   const target = markerData.find(m => m.postal_code === postal);
   if (!target) return;
 
-  const overlayHTML = `
-    <div style="
-        position: relative;
-        padding:10px;
-        background:white;
-        border:1px solid #ccc;
-        border-radius:8px;
-        width:200px;
-        z-index:9999;
-      ">
+  const overlayHTML = document.createElement('div');
+  overlayHTML.innerHTML = `
+    <div class="popup-overlay">
       <b>계기번호:</b><br>${target.meters.join("<br>")}
       <hr>
       <div style="text-align:center;">
@@ -101,6 +94,16 @@ function onMarkerClick(postal) {
     </div>
   `;
 
+  overlayHTML.querySelectorAll(".status-btn").forEach(btn => {
+    btn.addEventListener("click", async e => {
+      e.stopPropagation();
+      const p = e.target.dataset.postal;
+      const s = e.target.dataset.status;
+      console.log(`🔘 상태 변경 클릭됨: ${p} → ${s}`);
+      await changeStatus(p, s);
+    });
+  });
+
   const popup = new kakao.maps.CustomOverlay({
     position: new kakao.maps.LatLng(target.y, target.x),
     content: overlayHTML,
@@ -110,21 +113,7 @@ function onMarkerClick(postal) {
 
   popup.setMap(map);
   activeOverlay = popup;
-
-  // ✅ 버튼 이벤트를 동적으로 연결
-  setTimeout(() => {
-    document.querySelectorAll(".status-btn").forEach(btn => {
-      btn.addEventListener("click", async (e) => {
-        e.stopPropagation(); // 지도 클릭 전파 차단
-        const postalCode = e.target.dataset.postal;
-        const newStatus = e.target.dataset.status;
-        console.log(`🔘 상태 변경 클릭됨: ${postalCode} → ${newStatus}`);
-        await changeStatus(postalCode, newStatus);
-      });
-    });
-  }, 100);
 }
-
 
 // ---------------------- 상태 변경 ----------------------
 async function changeStatus(postal, status) {
@@ -132,7 +121,7 @@ async function changeStatus(postal, status) {
   const res = await fetch('/update_status', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    credentials: 'include', // ✅ 세션 쿠키 포함!
+    credentials: 'include',
     body: JSON.stringify({ postal_code: postal, status })
   });
 
@@ -149,7 +138,6 @@ async function changeStatus(postal, status) {
   }
 }
 
-
 // ---------------------- 소켓 이벤트 ----------------------
 socket.on("status_updated", data => {
   console.log("📬 상태 업데이트 수신:", data);
@@ -159,16 +147,8 @@ socket.on("status_updated", data => {
   updateMap();
 });
 
-socket.on("data_updated", () => {
-  console.log("🔄 새 데이터 감지됨 → 지도 갱신");
-  loadData();
-});
-
-// ---------------------- 지도 클릭 시 팝업 닫기 ----------------------
 function addMapClickListener() {
   kakao.maps.event.addListener(map, 'click', () => {
     if (activeOverlay) activeOverlay.setMap(null);
   });
 }
-
-
