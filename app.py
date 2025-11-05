@@ -92,33 +92,42 @@ def upload():
         if not file:
             return render_template("upload.html", error="⚠️ 파일이 선택되지 않았습니다.")
 
-        # 확장자에 따라 판다스로 읽기
-        df = pd.read_excel(file) if file.filename.endswith(".xlsx") else pd.read_csv(file)
+        try:
+            if file.filename.endswith(".xlsx"):
+                df = pd.read_excel(file, dtype=str)
+            else:
+                df = pd.read_csv(file, dtype=str)
+        except Exception as e:
+            return render_template("upload.html", error=f"❌ 엑셀 파일을 읽는 중 오류 발생: {e}")
+
+        # ✅ 컬럼명 전처리: 공백 제거, 소문자 변환
+        df.columns = [str(c).strip().lower() for c in df.columns]
+
+        # ✅ 가능한 컬럼 이름 매핑
+        address_cols = ["address", "주소", "주소지"]
+        meter_cols = ["meters", "계기번호", "계기", "meter"]
 
         dataset = session["dataset"]
         inserted = 0
 
         for _, row in df.iterrows():
-            # ✅ 한글/영문 컬럼명 자동 인식
-            address = (
-                str(row.get("address")
-                    or row.get("주소")
-                    or row.get("Address")
-                    or row.get("주소지", "")
-                ).strip()
-            )
-            meter = (
-                str(row.get("meters")
-                    or row.get("계기번호")
-                    or row.get("Meter")
-                    or row.get("계기", "")
-                ).strip()
-            )
+            # ✅ address와 meter 자동 탐지
+            address = ""
+            for c in address_cols:
+                if c.lower() in df.columns:
+                    address = str(row[c.lower()]).strip()
+                    break
+
+            meter = ""
+            for c in meter_cols:
+                if c.lower() in df.columns:
+                    meter = str(row[c.lower()]).strip()
+                    break
 
             if not address:
                 continue
 
-            # ✅ Kakao Local API (주소 → 좌표)
+            # ✅ Kakao Local API 호출
             url = f"https://dapi.kakao.com/v2/local/search/address.json?query={urllib.parse.quote(address)}"
             headers = {"Authorization": f"KakaoAK {KAKAO_API_KEY}"}
             res = requests.get(url, headers=headers)
@@ -129,7 +138,6 @@ def upload():
                 x, y = float(loc["x"]), float(loc["y"])
                 postal_code = loc.get("road_address", {}).get("zone_no") if loc.get("road_address") else None
 
-                # ✅ Supabase 저장
                 supabase.table("field_data").insert({
                     "dataset": dataset,
                     "address": address,
@@ -144,6 +152,7 @@ def upload():
         return render_template("upload.html", message=f"✅ {inserted}개의 주소가 업로드 및 변환되었습니다.")
     return render_template("upload.html")
 
+
 # -------------------------------------------------------------------------
 # 로그아웃
 # -------------------------------------------------------------------------
@@ -157,3 +166,4 @@ def logout():
 # -------------------------------------------------------------------------
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000)
+
