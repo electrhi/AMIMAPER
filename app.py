@@ -7,11 +7,16 @@ from supabase import create_client, Client
 import pandas as pd
 import requests, os, json, urllib.parse
 
+# -----------------------------
+# Flask 초기화
+# -----------------------------
 app = Flask(__name__)
 app.secret_key = "super_secret_key"
 socketio = SocketIO(app, cors_allowed_origins="*")
 
+# -----------------------------
 # 환경 변수
+# -----------------------------
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 KAKAO_JAVASCRIPT_KEY = os.getenv("KAKAO_JAVASCRIPT_KEY")
@@ -78,11 +83,13 @@ def update_status():
     postal_code = data["postal_code"]
     new_status = data["status"]
 
-    # 동일 우편번호 전체 상태 변경
-    supabase.table("field_data").update({"status": new_status}) \
+    print(f"🔄 상태 변경 요청: {postal_code} → {new_status}")
+
+    result = supabase.table("field_data").update({"status": new_status}) \
         .eq("dataset", dataset).eq("postal_code", postal_code).execute()
 
-    # 전체 클라이언트에게 실시간 업데이트 브로드캐스트
+    print(f"✅ Supabase 업데이트 완료: {len(result.data)}건 변경됨")
+
     socketio.emit("status_updated", {"postal_code": postal_code, "status": new_status}, broadcast=True)
     return jsonify({"message": "ok"})
 
@@ -160,6 +167,9 @@ def upload():
                 print(f"⚠️ {address} 변환 중 오류: {e}")
                 continue
 
+        # 업로드 완료 후 지도 자동 갱신 이벤트
+        socketio.emit("data_updated", {"dataset": dataset}, broadcast=True)
+
         return render_template("upload.html", message=f"✅ {inserted}개의 주소가 업로드 및 변환되었습니다.")
     return render_template("upload.html")
 
@@ -173,5 +183,8 @@ def logout():
     return redirect(url_for("login"))
 
 
+# -------------------------------------------------------------------------
+# 실행
+# -------------------------------------------------------------------------
 if __name__ == "__main__":
-    socketio.run(app, host="0.0.0.0", port=5000)
+    socketio.run(app, host="0.0.0.0", port=5000, debug=True)
