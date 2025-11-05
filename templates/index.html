@@ -4,7 +4,23 @@
   <meta charset="UTF-8">
   <title>현장관리 지도</title>
   <link rel="stylesheet" href="/static/style.css">
-  <script type="text/javascript" src="//dapi.kakao.com/v2/maps/sdk.js?appkey={{ kakao_javascript_key }}"></script>
+
+  <!-- ✅ Kakao Maps SDK (비동기 로드) -->
+  <script>
+    function loadKakaoMap() {
+      const script = document.createElement("script");
+      script.src = "//dapi.kakao.com/v2/maps/sdk.js?autoload=false&appkey={{ kakao_javascript_key }}";
+      script.onload = function () {
+        console.log("✅ Kakao Maps SDK 로드 완료");
+        kakao.maps.load(initMap);
+      };
+      document.head.appendChild(script);
+    }
+
+    // ✅ initMap은 script.js의 초기화 함수로 연결됨
+    window.addEventListener("load", loadKakaoMap);
+  </script>
+
   <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
   <script src="/static/script.js?v={{ range(100000)|random }}" defer></script>
 </head>
