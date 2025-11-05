@@ -6,12 +6,16 @@ from flask_socketio import SocketIO
 from supabase import create_client, Client
 import pandas as pd
 import requests, os, json, urllib.parse
+from flask_cors import CORS
+
+
 
 # -----------------------------
 # Flask 초기화
 # -----------------------------
 app = Flask(__name__)
 app.secret_key = "super_secret_key"
+CORS(app, supports_credentials=True)
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 # -----------------------------
@@ -199,4 +203,5 @@ def logout():
 # -------------------------------------------------------------------------
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000, debug=True)
+
 
