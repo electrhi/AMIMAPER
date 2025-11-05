@@ -4,7 +4,8 @@ eventlet.monkey_patch()
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 from flask_socketio import SocketIO
 from supabase import create_client, Client
-import requests, json, urllib.parse, os
+import pandas as pd
+import requests, os, json, urllib.parse
 
 # -----------------------------
 # Flask 초기화
@@ -14,16 +15,15 @@ app.secret_key = "super_secret_key"
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 # -----------------------------
-# 환경 변수 불러오기
+# 환경 변수
 # -----------------------------
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 KAKAO_API_KEY = os.getenv("KAKAO_API_KEY")
-
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # -------------------------------------------------------------------------
-# 로그인 페이지
+# 로그인
 # -------------------------------------------------------------------------
 @app.route("/login", methods=["GET", "POST"])
 def login():
@@ -42,43 +42,25 @@ def login():
     return render_template("login.html")
 
 # -------------------------------------------------------------------------
-# 지도 메인 페이지 (카카오 지도 버전)
+# 지도 메인 페이지
 # -------------------------------------------------------------------------
 @app.route("/")
 def index():
     if "user" not in session:
         return redirect(url_for("login"))
-    return render_template(
-        "index.html",
-        user=session["user"],
-        kakao_api_key=KAKAO_API_KEY
-    )
+    return render_template("index.html", user=session["user"], kakao_api_key=KAKAO_API_KEY)
 
 # -------------------------------------------------------------------------
-# Supabase 데이터 불러오기
+# 데이터 가져오기
 # -------------------------------------------------------------------------
 @app.route("/get_data")
 def get_data():
-    if "dataset" not in session:
+    dataset = session.get("dataset")
+    if not dataset:
         return jsonify([])
 
-    dataset = session["dataset"]
     rows = supabase.table("field_data").select("*").eq("dataset", dataset).execute().data
-
-    results = []
-    for item in rows:
-        results.append({
-            "id": item.get("id"),
-            "dataset": dataset,
-            "postal_code": item.get("postal_code"),
-            "address": item.get("address"),
-            "meters": item.get("meters") if isinstance(item.get("meters"), list) else [item.get("meters")],
-            "x": item.get("x"),
-            "y": item.get("y"),
-            "status": item.get("status", "미방문")
-        })
-
-    return jsonify(results)
+    return jsonify(rows)
 
 # -------------------------------------------------------------------------
 # 상태 업데이트
@@ -93,12 +75,58 @@ def update_status():
     supabase.table("field_data").update({"status": new_status}) \
         .eq("dataset", dataset).eq("postal_code", postal_code).execute()
 
-    socketio.emit("status_updated", {
-        "postal_code": postal_code,
-        "status": new_status
-    }, broadcast=True)
-
+    socketio.emit("status_updated", {"postal_code": postal_code, "status": new_status}, broadcast=True)
     return jsonify({"message": "ok"})
+
+# -------------------------------------------------------------------------
+# 엑셀 업로드 페이지
+# -------------------------------------------------------------------------
+@app.route("/upload", methods=["GET", "POST"])
+def upload():
+    if "user" not in session:
+        return redirect(url_for("login"))
+
+    if request.method == "POST":
+        file = request.files["file"]
+        if not file:
+            return render_template("upload.html", error="⚠️ 파일이 선택되지 않았습니다.")
+
+        df = pd.read_excel(file) if file.filename.endswith(".xlsx") else pd.read_csv(file)
+
+        # 엑셀 컬럼명 가정: address / meters
+        dataset = session["dataset"]
+        inserted = 0
+
+        for _, row in df.iterrows():
+            address = str(row.get("address", "")).strip()
+            if not address:
+                continue
+
+            # Kakao Local API 요청
+            url = f"https://dapi.kakao.com/v2/local/search/address.json?query={urllib.parse.quote(address)}"
+            headers = {"Authorization": f"KakaoAK {KAKAO_API_KEY}"}
+            res = requests.get(url, headers=headers)
+            data = res.json()
+
+            if data.get("documents"):
+                loc = data["documents"][0]
+                x, y = float(loc["x"]), float(loc["y"])
+                postal_code = loc.get("road_address", {}).get("zone_no") if loc.get("road_address") else None
+
+                # Supabase 저장
+                supabase.table("field_data").insert({
+                    "dataset": dataset,
+                    "address": address,
+                    "meters": [str(row.get("meters", ""))],
+                    "x": x,
+                    "y": y,
+                    "postal_code": postal_code,
+                    "status": "미방문"
+                }).execute()
+                inserted += 1
+
+        return render_template("upload.html", message=f"✅ {inserted}개의 주소가 업로드 및 변환되었습니다.")
+    return render_template("upload.html")
 
 # -------------------------------------------------------------------------
 # 로그아웃
