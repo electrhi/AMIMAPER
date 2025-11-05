@@ -83,9 +83,17 @@ def get_data():
 @app.route("/update_status", methods=["POST"])
 def update_status():
     data = request.json
+    print("📩 [DEBUG] 상태 업데이트 요청 도착:", data)  # ✅ 추가
     dataset = session.get("dataset")
-    postal_code = str(data.get("postal_code", "")).strip()
-    new_status = str(data.get("status", "")).strip()
+    postal_code = data["postal_code"]
+    new_status = data["status"]
+
+    supabase.table("field_data").update({"status": new_status}) \
+        .eq("dataset", dataset).eq("postal_code", postal_code).execute()
+
+    socketio.emit("status_updated", {"postal_code": postal_code, "status": new_status}, broadcast=True)
+    return jsonify({"message": "ok"})
+
 
     if not dataset or not postal_code:
         print("⚠️ 데이터셋 또는 우편번호 누락:", dataset, postal_code)
@@ -203,5 +211,6 @@ def logout():
 # -------------------------------------------------------------------------
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000, debug=True)
+
 
 
