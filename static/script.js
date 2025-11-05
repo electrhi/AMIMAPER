@@ -81,39 +81,45 @@ function onMarkerClick(postal) {
   const target = markerData.find(m => m.postal_code === postal);
   if (!target) return;
 
-  const overlayHTML = document.createElement('div');
-  overlayHTML.innerHTML = `
-    <div class="popup-overlay">
-      <b>계기번호:</b><br>${target.meters.join("<br>")}
-      <hr>
-      <div style="text-align:center;">
-        <button class="status-btn" data-postal="${postal}" data-status="완료">완료</button>
-        <button class="status-btn" data-postal="${postal}" data-status="불가">불가</button>
-        <button class="status-btn" data-postal="${postal}" data-status="미방문">미방문</button>
-      </div>
+  // ✅ 1. 팝업 HTML을 실제 DOM에 넣기 위해 element 생성
+  const popup = document.createElement("div");
+  popup.className = "popup-overlay";
+  popup.innerHTML = `
+    <b>계기번호:</b><br>${target.meters.join("<br>")}
+    <hr>
+    <div style="text-align:center;">
+      <button class="status-btn" data-postal="${postal}" data-status="완료">완료</button>
+      <button class="status-btn" data-postal="${postal}" data-status="불가">불가</button>
+      <button class="status-btn" data-postal="${postal}" data-status="미방문">미방문</button>
     </div>
   `;
 
-  overlayHTML.querySelectorAll(".status-btn").forEach(btn => {
-    btn.addEventListener("click", async e => {
-      e.stopPropagation();
-      const p = e.target.dataset.postal;
-      const s = e.target.dataset.status;
-      console.log(`🔘 상태 변경 클릭됨: ${p} → ${s}`);
-      await changeStatus(p, s);
+  // ✅ 2. 클릭 이벤트를 지도 이벤트로부터 분리
+  popup.addEventListener("click", e => e.stopPropagation());
+
+  // ✅ 3. 버튼 클릭 이벤트 연결
+  popup.querySelectorAll(".status-btn").forEach(btn => {
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation(); // 클릭 전파 방지
+      const postal = e.target.dataset.postal;
+      const newStatus = e.target.dataset.status;
+      console.log(`🔘 버튼 클릭됨: ${postal} → ${newStatus}`);
+      await changeStatus(postal, newStatus);
     });
   });
 
-  const popup = new kakao.maps.CustomOverlay({
+  // ✅ 4. 오버레이를 생성
+  const overlay = new kakao.maps.CustomOverlay({
     position: new kakao.maps.LatLng(target.y, target.x),
-    content: overlayHTML,
+    content: popup,
     yAnchor: 1,
     zIndex: 9999
   });
 
-  popup.setMap(map);
-  activeOverlay = popup;
+  overlay.setMap(map);
+  activeOverlay = overlay;
 }
+
 
 // ---------------------- 상태 변경 ----------------------
 async function changeStatus(postal, status) {
@@ -168,4 +174,5 @@ function addMapClickListener() {
     if (activeOverlay) activeOverlay.setMap(null);
   });
 }
+
 
