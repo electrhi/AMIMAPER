@@ -1,19 +1,81 @@
-<!DOCTYPE html>
-<html lang="ko">
-<head>
-  <meta charset="UTF-8" />
-  <title>주소 엑셀 업로드</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-</head>
-<body>
-  <h2>주소 엑셀 업로드</h2>
-  <form action="/upload" method="post" enctype="multipart/form-data">
-    <input type="file" name="file" accept=".xlsx" />
-    <button type="submit">업로드 및 좌표 변환</button>
-  </form>
+@app.route("/upload", methods=["GET", "POST"])
+def upload():
+    if "user" not in session:
+        return redirect(url_for("login"))
 
-  {% if message %}
-  <p style="color:green;">✅ {{ message }}</p>
-  {% endif %}
-</body>
-</html>
+    if request.method == "POST":
+        file = request.files["file"]
+        if not file:
+            return render_template("upload.html", error="⚠️ 파일이 선택되지 않았습니다.")
+
+        try:
+            # ✅ 엑셀 / CSV 자동 판별 + 디버깅용 로깅
+            if file.filename.endswith(".xlsx"):
+                df = pd.read_excel(file, dtype=str)
+            else:
+                df = pd.read_csv(file, dtype=str)
+
+            print("\n📂 [DEBUG] 파일명:", file.filename)
+            print("📋 [DEBUG] 원본 컬럼 목록:", list(df.columns))
+            print("🔍 [DEBUG] 총 행 수:", len(df))
+            print("🧾 [DEBUG] 첫 3행 미리보기:\n", df.head(3))
+            print("-" * 60)
+
+        except Exception as e:
+            print("❌ [ERROR] 엑셀 파일을 읽는 중 오류:", e)
+            return render_template("upload.html", error=f"❌ 엑셀 파일을 읽는 중 오류 발생: {e}")
+
+        # ✅ 컬럼명 전처리: 공백 제거, 소문자 변환
+        df.columns = [str(c).strip().lower() for c in df.columns]
+        print("✅ [DEBUG] 정제된 컬럼명:", df.columns.tolist())
+
+        # ✅ 가능한 컬럼 이름 매핑
+        address_cols = ["address", "주소", "주소지"]
+        meter_cols = ["meters", "계기번호", "계기", "meter"]
+
+        dataset = session["dataset"]
+        inserted = 0
+
+        for _, row in df.iterrows():
+            # ✅ address와 meter 자동 탐지
+            address = ""
+            for c in address_cols:
+                if c.lower() in df.columns:
+                    address = str(row[c.lower()]).strip()
+                    break
+
+            meter = ""
+            for c in meter_cols:
+                if c.lower() in df.columns:
+                    meter = str(row[c.lower()]).strip()
+                    break
+
+            if not address:
+                continue
+
+            # ✅ Kakao Local API 호출
+            url = f"https://dapi.kakao.com/v2/local/search/address.json?query={urllib.parse.quote(address)}"
+            headers = {"Authorization": f"KakaoAK {KAKAO_API_KEY}"}
+            res = requests.get(url, headers=headers)
+            data = res.json()
+
+            if data.get("documents"):
+                loc = data["documents"][0]
+                x, y = float(loc["x"]), float(loc["y"])
+                postal_code = loc.get("road_address", {}).get("zone_no") if loc.get("road_address") else None
+
+                supabase.table("field_data").insert({
+                    "dataset": dataset,
+                    "address": address,
+                    "meters": [meter],
+                    "x": x,
+                    "y": y,
+                    "postal_code": postal_code,
+                    "status": "미방문"
+                }).execute()
+                inserted += 1
+
+        print(f"✅ [DEBUG] 총 {inserted}개의 주소가 변환되어 Supabase에 저장되었습니다.\n")
+
+        return render_template("upload.html", message=f"✅ {inserted}개의 주소가 업로드 및 변환되었습니다.")
+    return render_template("upload.html")
