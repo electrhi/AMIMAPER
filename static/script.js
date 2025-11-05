@@ -1,60 +1,45 @@
 let map;
 let markerData = [];
-let activePopup = null;
 let markers = [];
+let activePopup = null;
 const socket = io();
-
-// ---------------------- Kakao SDK 로드 완료 후 실행 ----------------------
-window.kakaoAsyncInit = function () {
-  console.log("✅ Kakao Maps SDK 로드 완료");
-  initMap();
-};
-
-// ---------------------- Kakao SDK 로드 대기 ----------------------
-(function loadKakaoMapScript() {
-  const script = document.createElement("script");
-  script.src = `//dapi.kakao.com/v2/maps/sdk.js?appkey=${window.kakao_appkey}&autoload=false`;
-  script.onload = () => {
-    kakao.maps.load(() => {
-      console.log("🧭 Kakao Maps API 완전 로드됨");
-      initMap();
-    });
-  };
-  document.head.appendChild(script);
-})();
 
 // ---------------------- 지도 초기화 ----------------------
 function initMap() {
   console.log("🗺️ 지도 초기화 중...");
-  const container = document.getElementById("map");
-  const options = { center: new kakao.maps.LatLng(36.35, 127.38), level: 5 };
-  map = new kakao.maps.Map(container, options);
+  map = new kakao.maps.Map(document.getElementById("map"), {
+    center: new kakao.maps.LatLng(37.5665, 126.9780),
+    level: 5
+  });
 
-  kakao.maps.event.addListener(map, "click", closePopup);
+  kakao.maps.event.addListener(map, "click", () => closePopup());
 
-  console.log("📡 서버에서 데이터 로드 중...");
-  fetch("/get_data", { credentials: "include" })
-    .then((res) => res.json())
-    .then((data) => {
-      markerData = data;
-      console.log("✅ 데이터 수신 완료:", data.length, "건");
-      updateMap();
-    })
-    .catch((err) => console.error("❌ 데이터 로드 실패:", err));
+  loadData();
 }
 
-// ---------------------- 지도 갱신 ----------------------
-function updateMap() {
-  console.log("🗺️ 지도 갱신 중...");
-  if (!map) {
-    console.warn("⚠️ map 객체가 아직 준비되지 않음");
-    return;
+// ---------------------- 데이터 불러오기 ----------------------
+async function loadData() {
+  console.log("📡 서버에서 데이터 로드 중...");
+  try {
+    const res = await fetch("/get_data", { credentials: "include" });
+    const data = await res.json();
+    console.log("✅ 데이터 수신 완료:", data.length, "건");
+    markerData = data;
+    renderMarkers();
+  } catch (e) {
+    console.error("❌ 데이터 불러오기 실패:", e);
   }
+}
+
+// ---------------------- 마커 렌더링 ----------------------
+function renderMarkers() {
+  console.log("🗺️ 지도 마커 렌더링 중...");
 
   markers.forEach((m) => m.setMap(null));
   markers = [];
 
   const statusCount = { 완료: 0, 불가: 0, 미방문: 0 };
+
   markerData.forEach((d) => (statusCount[d.status] = (statusCount[d.status] || 0) + 1));
 
   document.getElementById("doneCount").innerText = statusCount["완료"] || 0;
@@ -63,32 +48,34 @@ function updateMap() {
 
   markerData.forEach((item) => {
     const color =
-      item.status === "완료" ? "#2ecc71" :
-      item.status === "불가" ? "#e74c3c" : "#3498db";
+      item.status === "완료"
+        ? "#2ecc71"
+        : item.status === "불가"
+        ? "#e74c3c"
+        : "#3498db";
 
-    const markerHTML = `
+    const marker = new kakao.maps.Marker({
+      map: map,
+      position: new kakao.maps.LatLng(item.y, item.x),
+      title: item.postal_code
+    });
+
+    const markerEl = document.createElement("div");
+    markerEl.innerHTML = `
       <div style="
         background:${color};
-        color:white;
+        width:30px;height:30px;
         border-radius:50%;
-        width:36px;
-        height:36px;
-        line-height:36px;
-        text-align:center;
-        font-weight:bold;
         border:2px solid white;
         box-shadow:0 0 3px rgba(0,0,0,0.3);
+        text-align:center;
+        line-height:30px;
+        color:white;font-weight:bold;
         cursor:pointer;
       ">${item.meters.length}</div>
     `;
-
-    const marker = new kakao.maps.CustomOverlay({
-      position: new kakao.maps.LatLng(item.y, item.x),
-      content: markerHTML,
-      map: map
-    });
-
-    kakao.maps.event.addListener(marker, "click", () => {
+    marker.setContent = markerEl;
+    markerEl.addEventListener("click", () => {
       console.log("📍 마커 클릭:", item.postal_code);
       openPopup(item);
     });
@@ -101,30 +88,26 @@ function updateMap() {
 function openPopup(item) {
   closePopup();
 
-  const popup = document.createElement("div");
-  popup.className = "popup-overlay";
-  popup.innerHTML = `
-    <b>계기번호:</b><br>${item.meters.join("<br>")}
-    <hr>
-    <div style="text-align:center;">
-      <button data-status="완료">완료</button>
-      <button data-status="불가">불가</button>
-      <button data-status="미방문">미방문</button>
-    </div>
-  `;
-
   const projection = map.getProjection();
   const point = projection.containerPointFromCoords(new kakao.maps.LatLng(item.y, item.x));
 
+  const popup = document.createElement("div");
+  popup.className = "map-popup";
+  popup.innerHTML = `
+    <div style="padding:10px;background:white;border-radius:8px;border:1px solid #ccc;box-shadow:0 2px 6px rgba(0,0,0,0.3);">
+      <b>계기번호:</b><br>${item.meters.join("<br>")}
+      <hr>
+      <div style="text-align:center;">
+        <button data-status="완료">완료</button>
+        <button data-status="불가">불가</button>
+        <button data-status="미방문">미방문</button>
+      </div>
+    </div>
+  `;
   popup.style.position = "absolute";
-  popup.style.left = `${point.x - 100}px`;
+  popup.style.left = `${point.x - 80}px`;
   popup.style.top = `${point.y - 120}px`;
-  popup.style.background = "white";
-  popup.style.border = "1px solid #ccc";
-  popup.style.borderRadius = "8px";
-  popup.style.padding = "10px";
   popup.style.zIndex = 9999;
-  popup.style.pointerEvents = "auto";
 
   document.body.appendChild(popup);
   activePopup = popup;
@@ -156,19 +139,15 @@ async function changeStatus(postal, status) {
     credentials: "include",
     body: JSON.stringify({ postal_code: postal, status }),
   });
-  console.log("📨 fetch 응답 status:", res.status);
+  console.log("📨 fetch 응답:", res.status);
+  const result = await res.json();
+  console.log("✅ 서버 응답:", result);
 
-  try {
-    const result = await res.json();
-    console.log("✅ 서버 응답:", result);
-    if (result.message === "ok") {
-      markerData.forEach((m) => {
-        if (m.postal_code === postal) m.status = status;
-      });
-      updateMap();
-    }
-  } catch (e) {
-    console.error("❌ 응답 파싱 실패:", e);
+  if (result.message === "ok") {
+    markerData.forEach((m) => {
+      if (m.postal_code === postal) m.status = status;
+    });
+    renderMarkers();
   }
 }
 
@@ -178,5 +157,5 @@ socket.on("status_updated", (data) => {
   markerData.forEach((m) => {
     if (m.postal_code === data.postal_code) m.status = data.status;
   });
-  updateMap();
+  renderMarkers();
 });
