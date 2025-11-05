@@ -80,19 +80,30 @@ def get_data():
 def update_status():
     data = request.json
     dataset = session.get("dataset")
-    postal_code = data["postal_code"]
-    new_status = data["status"]
+    postal_code = str(data.get("postal_code", "")).strip()
+    new_status = str(data.get("status", "")).strip()
 
-    print(f"🔄 상태 변경 요청: {postal_code} → {new_status}")
+    if not dataset or not postal_code:
+        print("⚠️ 데이터셋 또는 우편번호 누락:", dataset, postal_code)
+        return jsonify({"error": "invalid parameters"}), 400
 
-    result = supabase.table("field_data").update({"status": new_status}) \
-        .eq("dataset", dataset).eq("postal_code", postal_code).execute()
+    print(f"🔄 상태 변경 요청: dataset={dataset}, postal_code={postal_code}, new_status={new_status}")
 
-    print(f"✅ Supabase 업데이트 완료: {len(result.data)}건 변경됨")
+    # ✅ match() 사용으로 조건 일치 정확도 향상
+    result = supabase.table("field_data") \
+        .update({"status": new_status}) \
+        .match({"dataset": dataset, "postal_code": postal_code}) \
+        .execute()
+
+    print("📦 Supabase 응답:", result)
+    updated_rows = result.data if hasattr(result, "data") else []
+    print(f"✅ Supabase 업데이트 완료: {len(updated_rows)}건 변경됨")
+
+    if not updated_rows:
+        return jsonify({"error": "no rows updated"}), 404
 
     socketio.emit("status_updated", {"postal_code": postal_code, "status": new_status}, broadcast=True)
     return jsonify({"message": "ok"})
-
 
 # -------------------------------------------------------------------------
 # 엑셀 업로드 및 Kakao REST API 변환
@@ -188,3 +199,4 @@ def logout():
 # -------------------------------------------------------------------------
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000, debug=True)
+
