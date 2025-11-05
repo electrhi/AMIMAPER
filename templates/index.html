@@ -5,22 +5,38 @@
   <title>현장관리 지도</title>
   <link rel="stylesheet" href="/static/style.css">
 
+  <!-- ✅ Socket.IO 먼저 -->
+  <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+
+  <!-- ✅ 먼저 script.js를 로드 (initMap을 정의한 후) -->
+  <script src="/static/script.js?v={{ range(100000)|random }}"></script>
+
   <!-- ✅ Kakao Maps JS SDK (공식 권장 방식: autoload=false) -->
   <script>
-    function loadKakaoMap() {
+    window.addEventListener("load", () => {
       const script = document.createElement("script");
       script.src = "//dapi.kakao.com/v2/maps/sdk.js?autoload=false&appkey={{ kakao_javascript_key }}";
       script.onload = function() {
         console.log("✅ Kakao Maps SDK 로드 완료");
-        kakao.maps.load(initMap);
+        if (typeof kakao !== "undefined" && kakao.maps && typeof initMap === "function") {
+          kakao.maps.load(initMap);
+        } else {
+          console.error("❌ initMap 또는 kakao.maps 로드 실패");
+        }
       };
       document.head.appendChild(script);
-    }
-    window.addEventListener("load", loadKakaoMap);
+    });
   </script>
 
-  <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-  <script src="/static/script.js?v={{ range(100000)|random }}" defer></script>
+  <style>
+    body { margin: 0; font-family: sans-serif; }
+    header {
+      padding: 10px; background: #333; color: white;
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    #map { width: 100%; height: calc(100vh - 60px); }
+    .logout-btn { color: white; text-decoration: none; font-weight: bold; }
+  </style>
 </head>
 <body>
   <header>
