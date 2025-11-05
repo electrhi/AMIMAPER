@@ -1,3 +1,12 @@
+# ----------------------------------------------------
+# 🧩 eventlet는 가장 먼저 patch 적용해야 함
+# ----------------------------------------------------
+import eventlet
+eventlet.monkey_patch()
+
+# ----------------------------------------------------
+# 표준 라이브러리 및 패키지 import
+# ----------------------------------------------------
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session
 from flask_cors import CORS
 from flask_socketio import SocketIO
@@ -13,6 +22,7 @@ app = Flask(__name__)
 CORS(app)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "supersecretkey")
 
+# SocketIO 초기화 (eventlet 기반)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
 
 # ----------------------------------------------------
@@ -27,17 +37,7 @@ if not SUPABASE_URL or not SUPABASE_KEY:
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # ----------------------------------------------------
-# 메인 페이지
-# ----------------------------------------------------
-@app.route("/")
-def index():
-    if "user" not in session:
-        return redirect(url_for("login"))
-    kakao_key = os.getenv("KAKAO_JAVASCRIPT_KEY", "")
-    return render_template("index.html", kakao_javascript_key=kakao_key)
-
-# ----------------------------------------------------
-# 로그인 (단순 세션 로그인)
+# 로그인 / 세션 관리
 # ----------------------------------------------------
 @app.route("/login", methods=["GET", "POST"])
 def login():
@@ -45,17 +45,33 @@ def login():
         user_id = request.form.get("user_id")
         if user_id:
             session["user"] = user_id
+            print(f"🔐 로그인 성공: {user_id}")
             return redirect(url_for("index"))
-        return render_template("login.html", error="아이디를 입력해주세요.")
+        else:
+            print("❌ 로그인 실패: user_id 없음")
+            return render_template("login.html", error="아이디를 입력해주세요.")
     return render_template("login.html")
 
 @app.route("/logout")
 def logout():
-    session.clear()
+    user = session.pop("user", None)
+    print(f"🚪 로그아웃: {user}")
     return redirect(url_for("login"))
 
 # ----------------------------------------------------
-# 데이터 불러오기 (지도 마커용)
+# 메인 페이지
+# ----------------------------------------------------
+@app.route("/")
+def index():
+    if "user" not in session:
+        print("⚠️ 세션 없음 → 로그인 페이지 이동")
+        return redirect(url_for("login"))
+    kakao_key = os.getenv("KAKAO_JAVASCRIPT_KEY", "")
+    print(f"✅ 메인 페이지 로드: {session['user']}")
+    return render_template("index.html", kakao_javascript_key=kakao_key)
+
+# ----------------------------------------------------
+# 데이터 로드 (지도 마커용)
 # ----------------------------------------------------
 @app.route("/get_data")
 def get_data():
@@ -92,9 +108,7 @@ def update_status():
 
         print("🧾 Supabase 업데이트 결과:", result)
 
-        # SocketIO 브로드캐스트
         socketio.emit("status_updated", {"postal_code": postal_code, "status": status})
-
         return jsonify({"message": "ok", "updated": result.data}), 200
     except Exception as e:
         print("💥 /update_status 오류 발생:", e)
@@ -139,7 +153,7 @@ def upload_excel():
         return jsonify({"error": str(e)}), 500
 
 # ----------------------------------------------------
-# Socket.IO 연결 이벤트
+# Socket.IO 이벤트
 # ----------------------------------------------------
 @socketio.on("connect")
 def handle_connect():
@@ -150,7 +164,7 @@ def handle_disconnect():
     print("🔴 클라이언트 연결 해제됨")
 
 # ----------------------------------------------------
-# 실행 (Render에서는 gunicorn이 실행함)
+# 실행 (Render는 gunicorn이 자동 실행)
 # ----------------------------------------------------
 if __name__ == "__main__":
     print("🚀 Flask 서버 실행 중 (로컬 테스트용)")
