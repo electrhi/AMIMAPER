@@ -83,19 +83,20 @@ function onMarkerClick(postal) {
 
   const overlayHTML = `
     <div style="
+        position: relative;
         padding:10px;
         background:white;
         border:1px solid #ccc;
         border-radius:8px;
         width:200px;
-        pointer-events:auto;
+        z-index:9999;
       ">
       <b>계기번호:</b><br>${target.meters.join("<br>")}
       <hr>
       <div style="text-align:center;">
-        <button onclick="changeStatus('${postal}','완료')">완료</button>
-        <button onclick="changeStatus('${postal}','불가')">불가</button>
-        <button onclick="changeStatus('${postal}','미방문')">미방문</button>
+        <button class="status-btn" data-postal="${postal}" data-status="완료">완료</button>
+        <button class="status-btn" data-postal="${postal}" data-status="불가">불가</button>
+        <button class="status-btn" data-postal="${postal}" data-status="미방문">미방문</button>
       </div>
     </div>
   `;
@@ -103,12 +104,27 @@ function onMarkerClick(postal) {
   const popup = new kakao.maps.CustomOverlay({
     position: new kakao.maps.LatLng(target.y, target.x),
     content: overlayHTML,
-    yAnchor: 1
+    yAnchor: 1,
+    zIndex: 9999
   });
 
   popup.setMap(map);
   activeOverlay = popup;
+
+  // ✅ 버튼 이벤트를 동적으로 연결
+  setTimeout(() => {
+    document.querySelectorAll(".status-btn").forEach(btn => {
+      btn.addEventListener("click", async (e) => {
+        e.stopPropagation(); // 지도 클릭 전파 차단
+        const postalCode = e.target.dataset.postal;
+        const newStatus = e.target.dataset.status;
+        console.log(`🔘 상태 변경 클릭됨: ${postalCode} → ${newStatus}`);
+        await changeStatus(postalCode, newStatus);
+      });
+    });
+  }, 100);
 }
+
 
 // ---------------------- 상태 변경 ----------------------
 async function changeStatus(postal, status) {
@@ -147,3 +163,4 @@ function addMapClickListener() {
     if (activeOverlay) activeOverlay.setMap(null);
   });
 }
+
