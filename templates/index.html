@@ -4,15 +4,9 @@
   <meta charset="UTF-8">
   <title>현장관리 지도</title>
   <link rel="stylesheet" href="/static/style.css">
-
-  <!-- ✅ Kakao Maps JS SDK (JavaScript 키 사용) -->
-  <script 
-    type="text/javascript"
-    src="//dapi.kakao.com/v2/maps/sdk.js?appkey={{ kakao_javascript_key }}">
-  </script>
-
+  <script type="text/javascript" src="//dapi.kakao.com/v2/maps/sdk.js?appkey={{ kakao_javascript_key }}"></script>
   <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-  <script src="/static/script.js?v={{ range(10000)|random }}" defer></script>
+  <script src="/static/script.js?v={{ range(100000)|random }}" defer></script>
 </head>
 <body>
   <header>
@@ -22,9 +16,9 @@
       불가: <span id="failCount">0</span> | 
       미방문: <span id="pendingCount">0</span>
     </div>
+    <a href="/upload" class="logout-btn">엑셀 업로드</a>
     <a href="/logout" class="logout-btn">로그아웃</a>
   </header>
   <div id="map"></div>
 </body>
 </html>
-
