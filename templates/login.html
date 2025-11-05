@@ -2,20 +2,23 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
-  <title>로그인 | 현장관리 지도</title>
+  <title>로그인</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
   <div class="login-container">
-    <h2>🔒 현장관리 시스템 로그인</h2>
-    <form method="POST">
-      <input type="text" name="username" placeholder="아이디" required>
-      <input type="password" name="password" placeholder="비밀번호" required>
+    <h2>🔐 로그인</h2>
+
+    {% if error %}
+      <p style="color:red;">{{ error }}</p>
+    {% endif %}
+
+    <form method="POST" action="/login">
+      <label for="user_id">아이디</label>
+      <input type="text" id="user_id" name="user_id" placeholder="아이디를 입력하세요" required>
+      
       <button type="submit">로그인</button>
     </form>
-    {% if error %}
-      <p class="error">{{ error }}</p>
-    {% endif %}
   </div>
 </body>
 </html>
