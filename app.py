@@ -1,216 +1,157 @@
-import eventlet
-eventlet.monkey_patch()
-
-from flask import Flask, render_template, request, jsonify, session, redirect, url_for
+from flask import Flask, render_template, request, jsonify, redirect, url_for, session
+from flask_cors import CORS
 from flask_socketio import SocketIO
 from supabase import create_client, Client
+import os
 import pandas as pd
-import requests, os, json, urllib.parse
-from flask_cors import CORS
+import io
 
-
-
-# -----------------------------
-# Flask 초기화
-# -----------------------------
+# ----------------------------------------------------
+# Flask 초기 설정
+# ----------------------------------------------------
 app = Flask(__name__)
-app.secret_key = "super_secret_key"
-CORS(app, supports_credentials=True)
-socketio = SocketIO(app, cors_allowed_origins="*")
+CORS(app)
+app.secret_key = os.getenv("FLASK_SECRET_KEY", "supersecretkey")
 
-# -----------------------------
-# 환경 변수
-# -----------------------------
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
+
+# ----------------------------------------------------
+# Supabase 클라이언트 초기화
+# ----------------------------------------------------
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-KAKAO_JAVASCRIPT_KEY = os.getenv("KAKAO_JAVASCRIPT_KEY")
-KAKAO_REST_API_KEY = os.getenv("KAKAO_REST_API_KEY")
+
+if not SUPABASE_URL or not SUPABASE_KEY:
+    raise ValueError("❌ SUPABASE_URL 또는 SUPABASE_KEY 환경변수가 설정되지 않았습니다.")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# -------------------------------------------------------------------------
-# 로그인
-# -------------------------------------------------------------------------
-@app.route("/login", methods=["GET", "POST"])
-def login():
-    if request.method == "POST":
-        username = request.form["username"]
-        password = request.form["password"]
-
-        users = supabase.table("users").select("*").eq("username", username).execute().data
-
-        if users and users[0]["password"] == password:
-            session["user"] = username
-            session["dataset"] = users[0]["dataset"]
-            return redirect(url_for("index"))
-        else:
-            return render_template("login.html", error="❌ 아이디 또는 비밀번호가 올바르지 않습니다.")
-    return render_template("login.html")
-
-
-# -------------------------------------------------------------------------
-# 지도 페이지
-# -------------------------------------------------------------------------
+# ----------------------------------------------------
+# 메인 페이지
+# ----------------------------------------------------
 @app.route("/")
 def index():
     if "user" not in session:
         return redirect(url_for("login"))
-    return render_template("index.html", user=session["user"], kakao_javascript_key=KAKAO_JAVASCRIPT_KEY)
+    kakao_key = os.getenv("KAKAO_JAVASCRIPT_KEY", "")
+    return render_template("index.html", kakao_javascript_key=kakao_key)
 
-
-# -------------------------------------------------------------------------
-# 데이터 가져오기
-# -------------------------------------------------------------------------
-@app.route("/get_data")
-def get_data():
-    dataset = session.get("dataset")
-    if not dataset:
-        return jsonify([])
-
-    rows = supabase.table("field_data").select("*").eq("dataset", dataset).execute().data
-    for r in rows:
-        if isinstance(r.get("meters"), str):
-            try:
-                r["meters"] = json.loads(r["meters"])
-            except:
-                r["meters"] = [r["meters"]]
-    return jsonify(rows)
-
-
-# -------------------------------------------------------------------------
-# 상태 업데이트 (우편번호 단위 일괄 변경)
-# -------------------------------------------------------------------------
-@app.route("/update_status", methods=["POST"])
-def update_status():
-    data = request.json
-    print("📩 [DEBUG] 상태 업데이트 요청 도착:", data)  # ✅ 추가
-    dataset = session.get("dataset")
-    postal_code = data["postal_code"]
-    new_status = data["status"]
-
-    supabase.table("field_data").update({"status": new_status}) \
-        .eq("dataset", dataset).eq("postal_code", postal_code).execute()
-
-    socketio.emit("status_updated", {"postal_code": postal_code, "status": new_status}, broadcast=True)
-    return jsonify({"message": "ok"})
-
-
-    if not dataset or not postal_code:
-        print("⚠️ 데이터셋 또는 우편번호 누락:", dataset, postal_code)
-        return jsonify({"error": "invalid parameters"}), 400
-
-    print(f"🔄 상태 변경 요청: dataset={dataset}, postal_code={postal_code}, new_status={new_status}")
-
-    # ✅ match() 사용으로 조건 일치 정확도 향상
-    result = supabase.table("field_data") \
-        .update({"status": new_status}) \
-        .match({"dataset": dataset, "postal_code": postal_code}) \
-        .execute()
-
-    print("📦 Supabase 응답:", result)
-    updated_rows = result.data if hasattr(result, "data") else []
-    print(f"✅ Supabase 업데이트 완료: {len(updated_rows)}건 변경됨")
-
-    if not updated_rows:
-        return jsonify({"error": "no rows updated"}), 404
-
-    socketio.emit("status_updated", {"postal_code": postal_code, "status": new_status}, broadcast=True)
-    return jsonify({"message": "ok"})
-
-# -------------------------------------------------------------------------
-# 엑셀 업로드 및 Kakao REST API 변환
-# -------------------------------------------------------------------------
-@app.route("/upload", methods=["GET", "POST"])
-def upload():
-    if "user" not in session:
-        return redirect(url_for("login"))
-
+# ----------------------------------------------------
+# 로그인 (단순 세션 로그인)
+# ----------------------------------------------------
+@app.route("/login", methods=["GET", "POST"])
+def login():
     if request.method == "POST":
-        file = request.files["file"]
-        if not file:
-            return render_template("upload.html", error="⚠️ 파일이 선택되지 않았습니다.")
+        user_id = request.form.get("user_id")
+        if user_id:
+            session["user"] = user_id
+            return redirect(url_for("index"))
+        return render_template("login.html", error="아이디를 입력해주세요.")
+    return render_template("login.html")
 
-        try:
-            if file.filename.endswith(".xlsx"):
-                df = pd.read_excel(file, dtype=str)
-            else:
-                df = pd.read_csv(file, dtype=str)
-        except Exception as e:
-            return render_template("upload.html", error=f"❌ 엑셀 파일을 읽는 중 오류 발생: {e}")
-
-        df.columns = [str(c).strip() for c in df.columns]
-        address_cols = ["address", "주소", "주소지"]
-        meter_cols = ["meters", "계기번호", "계기", "meter"]
-        status_col = "진행"
-
-        dataset = session["dataset"]
-        inserted = 0
-
-        for _, row in df.iterrows():
-            address = next((str(row[c]).strip() for c in df.columns if any(x == c or x in c for x in address_cols) and pd.notna(row[c])), "")
-            meter = next((str(row[c]).strip() for c in df.columns if any(x == c or x in c for x in meter_cols) and pd.notna(row[c])), "")
-            status = row[status_col].strip() if status_col in df.columns and pd.notna(row[status_col]) else "미방문"
-
-            if not address:
-                continue
-
-            try:
-                url = f"https://dapi.kakao.com/v2/local/search/address.json?query={urllib.parse.quote(address)}"
-                headers = {"Authorization": f"KakaoAK {KAKAO_REST_API_KEY}"}
-                res = requests.get(url, headers=headers, timeout=10)
-                data = res.json()
-
-                if data.get("documents"):
-                    loc = data["documents"][0]
-                    x, y = float(loc["x"]), float(loc["y"])
-                    postal_code = loc.get("road_address", {}).get("zone_no") if loc.get("road_address") else None
-
-                    existing = supabase.table("field_data").select("*").eq("dataset", dataset).eq("postal_code", postal_code).execute().data
-
-                    if existing:
-                        existing_meters = json.loads(existing[0]["meters"])
-                        if meter not in existing_meters:
-                            existing_meters.append(meter)
-                            supabase.table("field_data").update({
-                                "meters": json.dumps(existing_meters)
-                            }).eq("dataset", dataset).eq("postal_code", postal_code).execute()
-                    else:
-                        supabase.table("field_data").insert({
-                            "dataset": dataset,
-                            "address": address,
-                            "meters": json.dumps([meter]),
-                            "x": x,
-                            "y": y,
-                            "postal_code": postal_code,
-                            "status": status
-                        }).execute()
-                    inserted += 1
-
-            except Exception as e:
-                print(f"⚠️ {address} 변환 중 오류: {e}")
-                continue
-
-        # 업로드 완료 후 지도 자동 갱신 이벤트
-        socketio.emit("data_updated", {"dataset": dataset}, broadcast=True)
-
-        return render_template("upload.html", message=f"✅ {inserted}개의 주소가 업로드 및 변환되었습니다.")
-    return render_template("upload.html")
-
-
-# -------------------------------------------------------------------------
-# 로그아웃
-# -------------------------------------------------------------------------
 @app.route("/logout")
 def logout():
     session.clear()
     return redirect(url_for("login"))
 
+# ----------------------------------------------------
+# 데이터 불러오기 (지도 마커용)
+# ----------------------------------------------------
+@app.route("/get_data")
+def get_data():
+    try:
+        response = supabase.table("field_data").select("*").execute()
+        data = response.data
+        print(f"✅ get_data: {len(data)}건 로드됨")
+        return jsonify(data)
+    except Exception as e:
+        print("💥 get_data 오류:", e)
+        return jsonify({"error": str(e)}), 500
 
-# -------------------------------------------------------------------------
-# 실행
-# -------------------------------------------------------------------------
+# ----------------------------------------------------
+# 상태 업데이트
+# ----------------------------------------------------
+@app.route("/update_status", methods=["POST"])
+def update_status():
+    try:
+        data = request.get_json()
+        print("📥 /update_status 요청 수신:", data)
+
+        postal_code = data.get("postal_code")
+        status = data.get("status")
+
+        if not postal_code or not status:
+            return jsonify({"error": "missing postal_code or status"}), 400
+
+        result = (
+            supabase.table("field_data")
+            .update({"status": status})
+            .eq("postal_code", postal_code)
+            .execute()
+        )
+
+        print("🧾 Supabase 업데이트 결과:", result)
+
+        # SocketIO 브로드캐스트
+        socketio.emit("status_updated", {"postal_code": postal_code, "status": status})
+
+        return jsonify({"message": "ok", "updated": result.data}), 200
+    except Exception as e:
+        print("💥 /update_status 오류 발생:", e)
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+# ----------------------------------------------------
+# 엑셀 업로드 → Supabase 반영
+# ----------------------------------------------------
+@app.route("/upload_excel", methods=["POST"])
+def upload_excel():
+    try:
+        if "file" not in request.files:
+            return jsonify({"error": "파일이 없습니다."}), 400
+
+        file = request.files["file"]
+        if not file.filename.endswith((".xls", ".xlsx")):
+            return jsonify({"error": "엑셀 파일만 업로드 가능합니다."}), 400
+
+        df = pd.read_excel(io.BytesIO(file.read()))
+        print("📊 업로드된 엑셀 컬럼:", list(df.columns))
+
+        records = df.to_dict(orient="records")
+        for record in records:
+            postal = str(record.get("postal_code", "")).strip()
+            if not postal:
+                continue
+            existing = supabase.table("field_data").select("*").eq("postal_code", postal).execute()
+            if existing.data:
+                supabase.table("field_data").update(record).eq("postal_code", postal).execute()
+            else:
+                supabase.table("field_data").insert(record).execute()
+
+        print(f"✅ 엑셀 업로드 완료 ({len(records)}건)")
+        return jsonify({"message": "ok", "count": len(records)})
+
+    except Exception as e:
+        print("💥 엑셀 업로드 오류:", e)
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+# ----------------------------------------------------
+# Socket.IO 연결 이벤트
+# ----------------------------------------------------
+@socketio.on("connect")
+def handle_connect():
+    print("🟢 클라이언트 연결됨")
+
+@socketio.on("disconnect")
+def handle_disconnect():
+    print("🔴 클라이언트 연결 해제됨")
+
+# ----------------------------------------------------
+# 실행 (Render에서는 gunicorn이 실행함)
+# ----------------------------------------------------
 if __name__ == "__main__":
-    socketio.run(app, host="0.0.0.0", port=5000, debug=True)
-
-
-
+    print("🚀 Flask 서버 실행 중 (로컬 테스트용)")
+    socketio.run(app, host="0.0.0.0", port=10000, debug=True)
