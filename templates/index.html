@@ -5,19 +5,17 @@
   <title>현장관리 지도</title>
   <link rel="stylesheet" href="/static/style.css">
 
-  <!-- ✅ Kakao Maps SDK (비동기 로드) -->
+  <!-- ✅ Kakao Maps JS SDK (공식 권장 방식: autoload=false) -->
   <script>
     function loadKakaoMap() {
       const script = document.createElement("script");
       script.src = "//dapi.kakao.com/v2/maps/sdk.js?autoload=false&appkey={{ kakao_javascript_key }}";
-      script.onload = function () {
+      script.onload = function() {
         console.log("✅ Kakao Maps SDK 로드 완료");
         kakao.maps.load(initMap);
       };
       document.head.appendChild(script);
     }
-
-    // ✅ initMap은 script.js의 초기화 함수로 연결됨
     window.addEventListener("load", loadKakaoMap);
   </script>
 
@@ -32,7 +30,6 @@
       불가: <span id="failCount">0</span> | 
       미방문: <span id="pendingCount">0</span>
     </div>
-    <a href="/upload" class="logout-btn">엑셀 업로드</a>
     <a href="/logout" class="logout-btn">로그아웃</a>
   </header>
   <div id="map"></div>
