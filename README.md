@@ -1,2 +1,2 @@
 # AMIMAPER
-Flask + Supabase + NaverMap 현장관리 시스템
+계기찾으러 가는 지도
