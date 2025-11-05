@@ -12,7 +12,7 @@ function initMap() {
     level: 5
   });
 
-  kakao.maps.event.addListener(map, "click", () => closePopup());
+  kakao.maps.event.addListener(map, "click", closePopup);
 
   loadData();
 }
@@ -35,17 +35,19 @@ async function loadData() {
 function renderMarkers() {
   console.log("🗺️ 지도 마커 렌더링 중...");
 
+  // 기존 마커 삭제
   markers.forEach((m) => m.setMap(null));
   markers = [];
 
+  // 상태 카운트 초기화
   const statusCount = { 완료: 0, 불가: 0, 미방문: 0 };
-
   markerData.forEach((d) => (statusCount[d.status] = (statusCount[d.status] || 0) + 1));
 
   document.getElementById("doneCount").innerText = statusCount["완료"] || 0;
   document.getElementById("failCount").innerText = statusCount["불가"] || 0;
   document.getElementById("pendingCount").innerText = statusCount["미방문"] || 0;
 
+  // 마커 생성
   markerData.forEach((item) => {
     const color =
       item.status === "완료"
@@ -54,33 +56,26 @@ function renderMarkers() {
         ? "#e74c3c"
         : "#3498db";
 
+    const markerImage = new kakao.maps.MarkerImage(
+      `https://dummyimage.com/36x36/${color.replace("#", "")}/ffffff&text=${item.meters.length}`,
+      new kakao.maps.Size(36, 36),
+      { offset: new kakao.maps.Point(18, 18) }
+    );
+
     const marker = new kakao.maps.Marker({
-      map: map,
       position: new kakao.maps.LatLng(item.y, item.x),
+      image: markerImage,
       title: item.postal_code
     });
 
-    const markerEl = document.createElement("div");
-    markerEl.innerHTML = `
-      <div style="
-        background:${color};
-        width:30px;height:30px;
-        border-radius:50%;
-        border:2px solid white;
-        box-shadow:0 0 3px rgba(0,0,0,0.3);
-        text-align:center;
-        line-height:30px;
-        color:white;font-weight:bold;
-        cursor:pointer;
-      ">${item.meters.length}</div>
-    `;
-    marker.setContent = markerEl;
-    markerEl.addEventListener("click", () => {
+    marker.setMap(map);
+    markers.push(marker);
+
+    // ✅ 공식 클릭 이벤트 등록
+    kakao.maps.event.addListener(marker, "click", () => {
       console.log("📍 마커 클릭:", item.postal_code);
       openPopup(item);
     });
-
-    markers.push(marker);
   });
 }
 
@@ -88,13 +83,21 @@ function renderMarkers() {
 function openPopup(item) {
   closePopup();
 
+  const position = new kakao.maps.LatLng(item.y, item.x);
   const projection = map.getProjection();
-  const point = projection.containerPointFromCoords(new kakao.maps.LatLng(item.y, item.x));
+  const point = projection.containerPointFromCoords(position);
 
   const popup = document.createElement("div");
   popup.className = "map-popup";
   popup.innerHTML = `
-    <div style="padding:10px;background:white;border-radius:8px;border:1px solid #ccc;box-shadow:0 2px 6px rgba(0,0,0,0.3);">
+    <div style="
+      background:white;
+      border:1px solid #ccc;
+      border-radius:8px;
+      box-shadow:0 2px 6px rgba(0,0,0,0.3);
+      padding:10px;
+      width:200px;
+    ">
       <b>계기번호:</b><br>${item.meters.join("<br>")}
       <hr>
       <div style="text-align:center;">
@@ -105,8 +108,8 @@ function openPopup(item) {
     </div>
   `;
   popup.style.position = "absolute";
-  popup.style.left = `${point.x - 80}px`;
-  popup.style.top = `${point.y - 120}px`;
+  popup.style.left = `${point.x - 100}px`;
+  popup.style.top = `${point.y - 150}px`;
   popup.style.zIndex = 9999;
 
   document.body.appendChild(popup);
