@@ -132,16 +132,23 @@ async function changeStatus(postal, status) {
   const res = await fetch('/update_status', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    credentials: 'include', // ✅ 세션 쿠키 포함!
     body: JSON.stringify({ postal_code: postal, status })
   });
+
   const result = await res.json();
   console.log("✅ 서버 응답:", result);
 
-  markerData.forEach(m => {
-    if (m.postal_code === postal) m.status = status;
-  });
-  updateMap();
+  if (result.message === "ok") {
+    markerData.forEach(m => {
+      if (m.postal_code === postal) m.status = status;
+    });
+    updateMap();
+  } else {
+    console.warn("⚠️ 업데이트 실패:", result);
+  }
 }
+
 
 // ---------------------- 소켓 이벤트 ----------------------
 socket.on("status_updated", data => {
@@ -163,4 +170,5 @@ function addMapClickListener() {
     if (activeOverlay) activeOverlay.setMap(null);
   });
 }
+
 
