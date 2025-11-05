@@ -15,6 +15,12 @@ import os
 import pandas as pd
 import io
 
+import logging
+log = logging.getLogger('werkzeug')
+log.setLevel(logging.WARNING)
+
+
+
 # ----------------------------------------------------
 # Flask 초기 설정
 # ----------------------------------------------------
@@ -169,3 +175,4 @@ def handle_disconnect():
 if __name__ == "__main__":
     print("🚀 Flask 서버 실행 중 (로컬 테스트용)")
     socketio.run(app, host="0.0.0.0", port=10000, debug=True)
+
