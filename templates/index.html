@@ -1,32 +1,16 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8">
-  <title>현장관리 지도</title>
-  <link rel="stylesheet" href="/static/style.css">
-
-  <!-- ✅ Kakao Maps JS SDK -->
-  <script 
-  type="text/javascript"
-  src="https://dapi.kakao.com/v2/maps/sdk.js?appkey={{ kakao_api_key }}">
-  </script>
-
-
-
-  <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-  <script src="/static/script.js" defer></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AMIMAPER 지도</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey={{ kakao_javascript_key }}&libraries=services"></script>
 </head>
 <body>
-  <header>
-    <h2>📍 현장관리 지도</h2>
-    <div id="statusBoard">
-      완료: <span id="doneCount">0</span> | 
-      불가: <span id="failCount">0</span> | 
-      미방문: <span id="pendingCount">0</span>
-    </div>
-    <a href="/logout" class="logout-btn">로그아웃</a>
-  </header>
-  <div id="map"></div>
+  <h2>AMIMAPER 현장 지도</h2>
+  <div id="map" style="width:100%; height:90vh;"></div>
+
+  <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
 </html>
-
