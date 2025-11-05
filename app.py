@@ -7,23 +7,17 @@ from supabase import create_client, Client
 import pandas as pd
 import requests, os, json, urllib.parse
 
-# -----------------------------
-# Flask 초기화
-# -----------------------------
 app = Flask(__name__)
 app.secret_key = "super_secret_key"
 socketio = SocketIO(app, cors_allowed_origins="*")
 
-# -----------------------------
 # 환경 변수
-# -----------------------------
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-KAKAO_JAVASCRIPT_KEY = os.getenv("KAKAO_JAVASCRIPT_KEY")  # 지도 표시용
-KAKAO_REST_API_KEY = os.getenv("KAKAO_REST_API_KEY")      # 주소 변환용
+KAKAO_JAVASCRIPT_KEY = os.getenv("KAKAO_JAVASCRIPT_KEY")
+KAKAO_REST_API_KEY = os.getenv("KAKAO_REST_API_KEY")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-
 
 # -------------------------------------------------------------------------
 # 로그인
@@ -84,9 +78,11 @@ def update_status():
     postal_code = data["postal_code"]
     new_status = data["status"]
 
+    # 동일 우편번호 전체 상태 변경
     supabase.table("field_data").update({"status": new_status}) \
         .eq("dataset", dataset).eq("postal_code", postal_code).execute()
 
+    # 전체 클라이언트에게 실시간 업데이트 브로드캐스트
     socketio.emit("status_updated", {"postal_code": postal_code, "status": new_status}, broadcast=True)
     return jsonify({"message": "ok"})
 
@@ -123,7 +119,7 @@ def upload():
         for _, row in df.iterrows():
             address = next((str(row[c]).strip() for c in df.columns if any(x == c or x in c for x in address_cols) and pd.notna(row[c])), "")
             meter = next((str(row[c]).strip() for c in df.columns if any(x == c or x in c for x in meter_cols) and pd.notna(row[c])), "")
-            status = row[status_col].strip() if status_col in df.columns else "미방문"
+            status = row[status_col].strip() if status_col in df.columns and pd.notna(row[status_col]) else "미방문"
 
             if not address:
                 continue
@@ -134,17 +130,13 @@ def upload():
                 res = requests.get(url, headers=headers, timeout=10)
                 data = res.json()
 
-                print(f"📡 [DEBUG] 주소: {address}")
-                print(f"🧾 [DEBUG] HTTP 응답코드: {res.status_code}")
-                print(f"🌐 [DEBUG] 응답 데이터: {data}")
-
                 if data.get("documents"):
                     loc = data["documents"][0]
                     x, y = float(loc["x"]), float(loc["y"])
                     postal_code = loc.get("road_address", {}).get("zone_no") if loc.get("road_address") else None
 
-                    # 우편번호가 이미 있으면 계기번호 병합
                     existing = supabase.table("field_data").select("*").eq("dataset", dataset).eq("postal_code", postal_code).execute().data
+
                     if existing:
                         existing_meters = json.loads(existing[0]["meters"])
                         if meter not in existing_meters:
@@ -181,10 +173,5 @@ def logout():
     return redirect(url_for("login"))
 
 
-# -------------------------------------------------------------------------
-# 실행
-# -------------------------------------------------------------------------
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000)
-
-
