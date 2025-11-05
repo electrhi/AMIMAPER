@@ -80,7 +80,7 @@ def update_status():
     return jsonify({"message": "ok"})
 
 # -------------------------------------------------------------------------
-# 엑셀 업로드 (주소 + 계기번호 자동 감지)
+# 엑셀 업로드 (디버그 로그 + 한글 컬럼 자동 감지 + 인식 강화)
 # -------------------------------------------------------------------------
 @app.route("/upload", methods=["GET", "POST"])
 def upload():
@@ -110,7 +110,7 @@ def upload():
             return render_template("upload.html", error=f"❌ 엑셀 파일을 읽는 중 오류 발생: {e}")
 
         # ✅ 컬럼명 전처리: 공백 제거, 소문자 변환
-        df.columns = [str(c).strip().lower() for c in df.columns]
+        df.columns = [str(c).strip() for c in df.columns]
         print("✅ [DEBUG] 정제된 컬럼명:", df.columns.tolist())
 
         # ✅ 가능한 컬럼 이름 매핑
@@ -121,49 +121,58 @@ def upload():
         inserted = 0
 
         for _, row in df.iterrows():
-            # ✅ address와 meter 자동 탐지
             address = ""
             for c in address_cols:
-                if c.lower() in df.columns:
-                    address = str(row[c.lower()]).strip()
+                for col in df.columns:
+                    if c in col:
+                        address = str(row[col]).strip()
+                        break
+                if address:
                     break
 
             meter = ""
             for c in meter_cols:
-                if c.lower() in df.columns:
-                    meter = str(row[c.lower()]).strip()
+                for col in df.columns:
+                    if c in col:
+                        meter = str(row[col]).strip()
+                        break
+                if meter:
                     break
 
             if not address:
                 continue
 
             # ✅ Kakao Local API 호출
-            url = f"https://dapi.kakao.com/v2/local/search/address.json?query={urllib.parse.quote(address)}"
-            headers = {"Authorization": f"KakaoAK {KAKAO_API_KEY}"}
-            res = requests.get(url, headers=headers)
-            data = res.json()
+            try:
+                url = f"https://dapi.kakao.com/v2/local/search/address.json?query={urllib.parse.quote(address)}"
+                headers = {"Authorization": f"KakaoAK {KAKAO_API_KEY}"}
+                res = requests.get(url, headers=headers)
+                data = res.json()
 
-            if data.get("documents"):
-                loc = data["documents"][0]
-                x, y = float(loc["x"]), float(loc["y"])
-                postal_code = loc.get("road_address", {}).get("zone_no") if loc.get("road_address") else None
+                if data.get("documents"):
+                    loc = data["documents"][0]
+                    x, y = float(loc["x"]), float(loc["y"])
+                    postal_code = loc.get("road_address", {}).get("zone_no") if loc.get("road_address") else None
 
-                supabase.table("field_data").insert({
-                    "dataset": dataset,
-                    "address": address,
-                    "meters": [meter],
-                    "x": x,
-                    "y": y,
-                    "postal_code": postal_code,
-                    "status": "미방문"
-                }).execute()
-                inserted += 1
+                    supabase.table("field_data").insert({
+                        "dataset": dataset,
+                        "address": address,
+                        "meters": [meter],
+                        "x": x,
+                        "y": y,
+                        "postal_code": postal_code,
+                        "status": "미방문"
+                    }).execute()
+                    inserted += 1
+
+            except Exception as e:
+                print(f"⚠️ [WARNING] '{address}' 변환 중 오류 발생:", e)
+                continue
 
         print(f"✅ [DEBUG] 총 {inserted}개의 주소가 변환되어 Supabase에 저장되었습니다.\n")
 
         return render_template("upload.html", message=f"✅ {inserted}개의 주소가 업로드 및 변환되었습니다.")
     return render_template("upload.html")
-
 
 # -------------------------------------------------------------------------
 # 로그아웃
@@ -178,5 +187,3 @@ def logout():
 # -------------------------------------------------------------------------
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000)
-
-
