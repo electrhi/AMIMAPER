@@ -32,6 +32,7 @@ async function loadData() {
 }
 
 // ---------------------- 마커 렌더링 ----------------------
+// ---------------------- 마커 렌더링 ----------------------
 function renderMarkers() {
   console.log("🗺️ 지도 마커 렌더링 중...");
 
@@ -49,6 +50,9 @@ function renderMarkers() {
 
   // 마커 생성
   markerData.forEach((item) => {
+    const position = new kakao.maps.LatLng(item.y, item.x);
+
+    // ✅ 상태별 색상 원형 마커 아이콘 직접 표시
     const color =
       item.status === "완료"
         ? "#2ecc71"
@@ -56,27 +60,32 @@ function renderMarkers() {
         ? "#e74c3c"
         : "#3498db";
 
-    const markerImage = new kakao.maps.MarkerImage(
-      `https://dummyimage.com/36x36/${color.replace("#", "")}/ffffff&text=${item.meters.length}`,
-      new kakao.maps.Size(36, 36),
-      { offset: new kakao.maps.Point(18, 18) }
-    );
+    const markerEl = document.createElement("div");
+    markerEl.style.width = "20px";
+    markerEl.style.height = "20px";
+    markerEl.style.background = color;
+    markerEl.style.borderRadius = "50%";
+    markerEl.style.border = "2px solid white";
+    markerEl.style.boxShadow = "0 0 4px rgba(0,0,0,0.3)";
 
-    const marker = new kakao.maps.Marker({
-      position: new kakao.maps.LatLng(item.y, item.x),
-      image: markerImage,
-      title: item.postal_code
+    const marker = new kakao.maps.CustomOverlay({
+      position,
+      content: markerEl,
+      yAnchor: 1,
     });
 
     marker.setMap(map);
     markers.push(marker);
 
-    // ✅ 공식 클릭 이벤트 등록
-    kakao.maps.event.addListener(marker, "click", () => {
+    // ✅ 클릭 이벤트
+    markerEl.addEventListener("click", (e) => {
+      e.stopPropagation(); // 지도 클릭으로 팝업 닫히지 않게 방지
       console.log("📍 마커 클릭:", item.postal_code);
       openPopup(item);
     });
   });
+}
+
 }
 
 // ---------------------- 팝업 열기 ----------------------
@@ -162,3 +171,4 @@ socket.on("status_updated", (data) => {
   });
   renderMarkers();
 });
+
