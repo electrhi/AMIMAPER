@@ -24,20 +24,23 @@ function updateMap() {
   markers = [];
 
   markerData.forEach(item => {
-    let color = item.status === '완료' ? '#2ecc71' :
-                item.status === '불가' ? '#e74c3c' : '#3498db';
+    const color =
+      item.status === '완료' ? '#2ecc71' :
+      item.status === '불가' ? '#e74c3c' :
+      '#3498db';
 
     const markerContent = `
       <div style="
         background:${color};
         color:white;
         border-radius:50%;
-        width:32px;
-        height:32px;
-        line-height:32px;
+        width:36px;
+        height:36px;
+        line-height:36px;
         text-align:center;
         font-weight:bold;
         border:2px solid white;
+        box-shadow:0 0 3px rgba(0,0,0,0.3);
       ">${item.meters.length}</div>
     `;
 
@@ -48,7 +51,7 @@ function updateMap() {
     });
 
     const overlayContent = `
-      <div style="padding:10px; background:white; border:1px solid #ccc; border-radius:8px; width:180px;">
+      <div style="padding:10px; background:white; border:1px solid #ccc; border-radius:8px; width:200px;">
         <b>계기번호:</b><br>${item.meters.join("<br>")}
         <hr>
         <div style="text-align:center;">
@@ -74,7 +77,6 @@ function updateMap() {
     markers.push(marker);
   });
 
-  // 지도 클릭 시 모든 팝업 닫기
   kakao.maps.event.addListener(map, 'click', () => {
     if (activeOverlay) activeOverlay.setMap(null);
   });
