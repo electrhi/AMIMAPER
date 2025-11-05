@@ -124,25 +124,41 @@ async function changeStatus(postal, status) {
     credentials: 'include',
     body: JSON.stringify({ postal_code: postal, status })
   });
-
-  const result = await res.json();
-  console.log("✅ 서버 응답:", result);
-
+  console.log("📨 fetch 응답 status:", res.status);
+  let result;
+  try {
+    result = await res.json();
+  } catch(e) {
+    console.error("❌ JSON 파싱 실패:", e);
+    return;
+  }
+  console.log("✅ 서버 응답 데이터:", result);
+  
   if (result.message === "ok") {
+    console.log("🔁 로컬 markerData 상태 변경 적용");
     markerData.forEach(m => {
-      if (m.postal_code === postal) m.status = status;
+      if (m.postal_code === postal) {
+        console.log("   → 변경됨:", m.postal_code, m.status, "→", status);
+        m.status = status;
+      }
     });
     updateMap();
   } else {
-    console.warn("⚠️ 업데이트 실패:", result);
+    console.warn("⚠️ 업데이트 실패 응답:", result);
   }
 }
 
 // ---------------------- 소켓 이벤트 ----------------------
 socket.on("status_updated", data => {
   console.log("📬 상태 업데이트 수신:", data);
+  if (!data.postal_code) {
+    console.warn("⚠️ postal_code 없음:", data);
+  }
   markerData.forEach(m => {
-    if (m.postal_code === data.postal_code) m.status = data.status;
+    if (m.postal_code === data.postal_code) {
+      console.log("   → markerData 상태 변경:", m.postal_code, m.status, "→", data.status);
+      m.status = data.status;
+    }
   });
   updateMap();
 });
@@ -152,3 +168,4 @@ function addMapClickListener() {
     if (activeOverlay) activeOverlay.setMap(null);
   });
 }
+
