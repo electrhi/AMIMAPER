@@ -80,7 +80,7 @@ def update_status():
     return jsonify({"message": "ok"})
 
 # -------------------------------------------------------------------------
-# 엑셀 업로드 (디버그 로그 + 한글 컬럼 자동 감지 + 인식 강화)
+# 엑셀 업로드 (주소 자동 감지 + Kakao API 결과 로깅 + 디버그 확장)
 # -------------------------------------------------------------------------
 @app.route("/upload", methods=["GET", "POST"])
 def upload():
@@ -109,7 +109,7 @@ def upload():
             print("❌ [ERROR] 엑셀 파일을 읽는 중 오류:", e)
             return render_template("upload.html", error=f"❌ 엑셀 파일을 읽는 중 오류 발생: {e}")
 
-        # ✅ 컬럼명 전처리: 공백 제거, 소문자 변환
+        # ✅ 컬럼명 전처리: 공백 제거, 소문자 변환 없이 그대로 유지
         df.columns = [str(c).strip() for c in df.columns]
         print("✅ [DEBUG] 정제된 컬럼명:", df.columns.tolist())
 
@@ -122,22 +122,19 @@ def upload():
 
         for _, row in df.iterrows():
             address = ""
-            for c in address_cols:
-                for col in df.columns:
-                    if c in col:
-                        address = str(row[col]).strip()
-                        break
-                if address:
+            # ✅ 개선된 주소 탐색 로직
+            for col in df.columns:
+                if any(c == col or c in col for c in address_cols):
+                    address = str(row[col]).strip()
                     break
 
             meter = ""
-            for c in meter_cols:
-                for col in df.columns:
-                    if c in col:
-                        meter = str(row[col]).strip()
-                        break
-                if meter:
+            for col in df.columns:
+                if any(c == col or c in col for c in meter_cols):
+                    meter = str(row[col]).strip()
                     break
+
+            print(f"📍 [DEBUG] 추출된 주소: '{address}', 계기번호: '{meter}'")
 
             if not address:
                 continue
@@ -148,6 +145,8 @@ def upload():
                 headers = {"Authorization": f"KakaoAK {KAKAO_API_KEY}"}
                 res = requests.get(url, headers=headers)
                 data = res.json()
+
+                print(f"🌐 [DEBUG] Kakao API 응답 ({address}):", data)
 
                 if data.get("documents"):
                     loc = data["documents"][0]
@@ -164,6 +163,8 @@ def upload():
                         "status": "미방문"
                     }).execute()
                     inserted += 1
+                else:
+                    print(f"⚠️ [WARNING] '{address}' → Kakao API에서 좌표를 찾지 못했습니다.")
 
             except Exception as e:
                 print(f"⚠️ [WARNING] '{address}' 변환 중 오류 발생:", e)
