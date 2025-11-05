@@ -71,7 +71,14 @@ function onMarkerClick(postal) {
   if (!target) return;
 
   const overlayHTML = `
-    <div style="padding:10px; background:white; border:1px solid #ccc; border-radius:8px; width:200px;">
+    <div style="
+        padding:10px;
+        background:white;
+        border:1px solid #ccc;
+        border-radius:8px;
+        width:200px;
+        pointer-events:auto; /* ✅ 버튼 클릭 가능하게 설정 */
+      ">
       <b>계기번호:</b><br>${target.meters.join("<br>")}
       <hr>
       <div style="text-align:center;">
@@ -100,8 +107,15 @@ async function changeStatus(postal, status) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ postal_code: postal, status })
   });
+
   const result = await res.json();
   console.log("✅ 서버 응답:", result);
+
+  // 상태를 로컬에서도 즉시 갱신
+  markerData.forEach(m => {
+    if (m.postal_code === postal) m.status = status;
+  });
+  updateMap();
 }
 
 // ---------------------- 소켓 이벤트 ----------------------
