@@ -134,8 +134,9 @@ def upload():
                 res = requests.get(url, headers=headers, timeout=10)
                 data = res.json()
 
-                print(f"📡 [DEBUG] 요청 주소: {address}")
-                print(f"🌐 [DEBUG] Kakao API 응답: {data}")
+                print(f"📡 [DEBUG] 주소: {address}")
+                print(f"🧾 [DEBUG] HTTP 응답코드: {res.status_code}")
+                print(f"🌐 [DEBUG] 응답 데이터: {data}")
 
                 if data.get("documents"):
                     loc = data["documents"][0]
@@ -185,4 +186,5 @@ def logout():
 # -------------------------------------------------------------------------
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000)
+
 
