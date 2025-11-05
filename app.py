@@ -93,15 +93,25 @@ def upload():
             return render_template("upload.html", error="⚠️ 파일이 선택되지 않았습니다.")
 
         try:
+            # ✅ 엑셀 / CSV 자동 판별 + 디버깅용 로깅
             if file.filename.endswith(".xlsx"):
                 df = pd.read_excel(file, dtype=str)
             else:
                 df = pd.read_csv(file, dtype=str)
+
+            print("\n📂 [DEBUG] 파일명:", file.filename)
+            print("📋 [DEBUG] 원본 컬럼 목록:", list(df.columns))
+            print("🔍 [DEBUG] 총 행 수:", len(df))
+            print("🧾 [DEBUG] 첫 3행 미리보기:\n", df.head(3))
+            print("-" * 60)
+
         except Exception as e:
+            print("❌ [ERROR] 엑셀 파일을 읽는 중 오류:", e)
             return render_template("upload.html", error=f"❌ 엑셀 파일을 읽는 중 오류 발생: {e}")
 
         # ✅ 컬럼명 전처리: 공백 제거, 소문자 변환
         df.columns = [str(c).strip().lower() for c in df.columns]
+        print("✅ [DEBUG] 정제된 컬럼명:", df.columns.tolist())
 
         # ✅ 가능한 컬럼 이름 매핑
         address_cols = ["address", "주소", "주소지"]
@@ -149,6 +159,8 @@ def upload():
                 }).execute()
                 inserted += 1
 
+        print(f"✅ [DEBUG] 총 {inserted}개의 주소가 변환되어 Supabase에 저장되었습니다.\n")
+
         return render_template("upload.html", message=f"✅ {inserted}개의 주소가 업로드 및 변환되었습니다.")
     return render_template("upload.html")
 
@@ -166,4 +178,5 @@ def logout():
 # -------------------------------------------------------------------------
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000)
+
 
