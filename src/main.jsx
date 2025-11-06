@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { createClient } from "@supabase/supabase-js";
 import * as XLSX from "xlsx";
 
+// 🧩 Supabase + Kakao 설정
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_KEY;
 const KAKAO_KEY = import.meta.env.VITE_KAKAO_JAVASCRIPT_KEY;
@@ -18,28 +19,42 @@ function App() {
   const [counts, setCounts] = useState({ 완료: 0, 불가: 0, 미방문: 0 });
 
   let activeOverlay = null;
-  let markers = []; // 지도에 표시된 마커 및 오버레이 저장
+  let markers = [];
 
   // ✅ 로그인 처리
   const handleLogin = async (e) => {
     e.preventDefault();
+    console.log("🔐 로그인 시도:", user);
+
     const { data: users, error } = await supabase.from("users").select("*").eq("id", user);
-    if (error) return alert("Supabase 오류: " + error.message);
+    if (error) {
+      console.error("❌ Supabase 오류:", error.message);
+      return alert("Supabase 오류 발생");
+    }
+
     if (users && users.length > 0 && users[0].password === password) {
+      console.log("✅ 로그인 성공:", users[0]);
       await loadExcel(users[0].data_file);
       setLoggedIn(true);
-    } else alert("로그인 실패: 아이디 또는 비밀번호 확인");
+    } else {
+      console.warn("⚠️ 로그인 실패 — 사용자 또는 비밀번호 불일치");
+      alert("로그인 실패: 아이디 또는 비밀번호 확인");
+    }
   };
 
   // ✅ Excel 로드
   const loadExcel = async (fileName) => {
     try {
+      console.log("📂 엑셀 로드 시도:", fileName);
       const { data, error } = await supabase.storage.from("excels").download(fileName);
       if (error) throw error;
+
       const blob = await data.arrayBuffer();
       const workbook = XLSX.read(blob, { type: "array" });
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
       const json = XLSX.utils.sheet_to_json(sheet);
+      console.log("📊 엑셀 데이터 로드 완료:", json.length, "행");
+
       setData(
         json.map((row) => ({
           계기번호: row["계기번호"],
@@ -48,6 +63,7 @@ function App() {
         }))
       );
     } catch (err) {
+      console.error("❌ 엑셀 로드 실패:", err.message);
       alert("엑셀 로드 실패: " + err.message);
     }
   };
@@ -55,6 +71,8 @@ function App() {
   // ✅ Kakao 지도 로드
   useEffect(() => {
     if (!loggedIn) return;
+    console.log("🗺️ Kakao 지도 스크립트 로드 중...");
+
     const script = document.createElement("script");
     script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${KAKAO_KEY}&autoload=false&libraries=services`;
     script.async = true;
@@ -65,21 +83,23 @@ function App() {
           center: new window.kakao.maps.LatLng(37.5665, 126.9780),
           level: 5,
         });
+        console.log("✅ Kakao 지도 초기화 완료");
         setMap(mapInstance);
       });
     };
     document.head.appendChild(script);
   }, [loggedIn]);
 
-  // ✅ 지도 마커 렌더링 (React 상태 변화 감지)
+  // ✅ 지도 데이터 렌더링
   useEffect(() => {
     if (!map || data.length === 0) return;
+    console.log("🧭 지도 렌더링 시작 — 데이터 행 수:", data.length);
     renderMarkers();
   }, [map, data]);
 
-  // ✅ 지도에 마커 표시 함수
+  // ✅ 마커 렌더링 함수
   const renderMarkers = () => {
-    // 기존 마커 및 오버레이 제거
+    console.log("🧹 기존 마커 제거 중...");
     markers.forEach((m) => m.setMap && m.setMap(null));
     markers = [];
 
@@ -94,19 +114,20 @@ function App() {
     });
     setCounts(statusCount);
 
-    Object.keys(grouped).forEach((addr) => {
+    Object.keys(grouped).forEach((addr, index) => {
       geocoder.addressSearch(addr, (result, status) => {
+        console.log(`📍 주소(${index + 1}): ${addr} → 상태: ${status}`);
+
         if (status !== window.kakao.maps.services.Status.OK) return;
         const coords = new window.kakao.maps.LatLng(result[0].y, result[0].x);
         const group = grouped[addr];
         const 진행 = group[0].진행;
         const color = 진행 === "완료" ? "green" : 진행 === "불가" ? "red" : "blue";
 
-        // 마커 생성
         const marker = new window.kakao.maps.Marker({ position: coords, map });
         markers.push(marker);
 
-        // 숫자 표시용 CustomOverlay
+        // CustomOverlay 생성
         const overlayEl = document.createElement("div");
         overlayEl.style.cssText = `
           background:${color};
@@ -131,6 +152,7 @@ function App() {
 
         // 팝업 열기
         const showPopup = () => {
+          console.log(`🖱️ 마커 클릭됨: ${addr}`);
           if (activeOverlay) activeOverlay.setMap(null);
 
           const popupEl = document.createElement("div");
@@ -153,22 +175,34 @@ function App() {
           popupOverlay.setMap(map);
           activeOverlay = popupOverlay;
 
-          // 버튼 클릭 이벤트
-          popupEl.querySelector("#doneBtn").addEventListener("click", (e) => {
-            e.stopPropagation();
-            updateStatus(addr, "완료");
-          });
-          popupEl.querySelector("#failBtn").addEventListener("click", (e) => {
-            e.stopPropagation();
-            updateStatus(addr, "불가");
-          });
-          popupEl.querySelector("#todoBtn").addEventListener("click", (e) => {
-            e.stopPropagation();
-            updateStatus(addr, "미방문");
-          });
+          setTimeout(() => {
+            const doneBtn = document.getElementById("doneBtn");
+            const failBtn = document.getElementById("failBtn");
+            const todoBtn = document.getElementById("todoBtn");
+
+            if (!doneBtn || !failBtn || !todoBtn) {
+              console.warn("⚠️ 버튼 요소를 찾을 수 없습니다!");
+              return;
+            }
+
+            doneBtn.onclick = (e) => {
+              e.stopPropagation();
+              console.log("✅ 완료 버튼 클릭:", addr);
+              updateStatus(addr, "완료");
+            };
+            failBtn.onclick = (e) => {
+              e.stopPropagation();
+              console.log("❌ 불가 버튼 클릭:", addr);
+              updateStatus(addr, "불가");
+            };
+            todoBtn.onclick = (e) => {
+              e.stopPropagation();
+              console.log("🟦 미방문 버튼 클릭:", addr);
+              updateStatus(addr, "미방문");
+            };
+          }, 100);
         };
 
-        // 클릭 이벤트 등록
         overlayEl.addEventListener("click", (e) => {
           e.stopPropagation();
           showPopup();
@@ -177,22 +211,25 @@ function App() {
       });
     });
 
-    // 지도 클릭 시 팝업 닫기
     window.kakao.maps.event.addListener(map, "click", () => {
       if (activeOverlay) {
+        console.log("🧩 지도 클릭 — 팝업 닫기");
         activeOverlay.setMap(null);
         activeOverlay = null;
       }
     });
   };
 
-  // ✅ 상태 업데이트 (지도 리렌더링 포함)
+  // ✅ 상태 업데이트
   const updateStatus = async (addr, status) => {
+    console.log(`🛠️ 상태 업데이트 시도: ${addr} → ${status}`);
     const updated = data.map((d) =>
       d.주소 === addr ? { ...d, 진행: status } : d
     );
-    setData(updated); // 상태 변경 → 자동 리렌더링
-    await supabase.from("meters").upsert(updated);
+    setData(updated);
+    const { error } = await supabase.from("meters").upsert(updated);
+    if (error) console.error("❌ Supabase 업데이트 실패:", error.message);
+    else console.log("✅ Supabase 업데이트 성공");
   };
 
   // ✅ 로그인 UI
