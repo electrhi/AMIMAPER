@@ -3,10 +3,12 @@ import ReactDOM from "react-dom/client";
 import { createClient } from "@supabase/supabase-js";
 import * as XLSX from "xlsx";
 
+// ✅ Render 환경변수 (반드시 VITE_ 접두사로 설정)
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_KEY;
 const KAKAO_KEY = import.meta.env.VITE_KAKAO_JAVASCRIPT_KEY;
 
+// ✅ Supabase 클라이언트 초기화
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 function App() {
@@ -17,10 +19,19 @@ function App() {
   const [map, setMap] = useState(null);
   const [counts, setCounts] = useState({ 완료: 0, 불가: 0, 미방문: 0 });
 
-  // 로그인 처리
+  // ✅ 로그인 처리
   const handleLogin = async (e) => {
     e.preventDefault();
-    const { data: users } = await supabase.from("users").select("*").eq("id", user);
+    const { data: users, error } = await supabase
+      .from("users")
+      .select("*")
+      .eq("id", user);
+
+    if (error) {
+      alert("Supabase 오류 발생: " + error.message);
+      return;
+    }
+
     if (users && users.length > 0 && users[0].password === password) {
       const dataFile = users[0].data_file;
       await loadExcel(dataFile);
@@ -30,11 +41,12 @@ function App() {
     }
   };
 
-  // 엑셀 파일 로드
+  // ✅ 엑셀 파일 로드
   const loadExcel = async (fileName) => {
     try {
       const { data, error } = await supabase.storage.from("excels").download(fileName);
       if (error) throw error;
+
       const blob = await data.arrayBuffer();
       const workbook = XLSX.read(blob, { type: "array" });
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
@@ -51,16 +63,16 @@ function App() {
     }
   };
 
-  // 카카오 지도 로드
+  // ✅ Kakao 지도 로드 (services 라이브러리 포함)
   useEffect(() => {
     if (!loggedIn) return;
 
     const script = document.createElement("script");
-    script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${KAKAO_KEY}&autoload=false`;
+    script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${KAKAO_KEY}&autoload=false&libraries=services`;
     script.async = true;
 
     script.onload = () => {
-      window.kakao.maps.load(async () => {
+      window.kakao.maps.load(() => {
         const container = document.getElementById("map");
         const options = {
           center: new window.kakao.maps.LatLng(37.5665, 126.9780),
@@ -70,17 +82,18 @@ function App() {
         setMap(mapInstance);
       });
     };
+
     document.head.appendChild(script);
   }, [loggedIn]);
 
-  // 지도 마커 표시
+  // ✅ 지도 마커 표시
   useEffect(() => {
     if (!map || data.length === 0) return;
 
     const geocoder = new window.kakao.maps.services.Geocoder();
     const grouped = {};
 
-    // 주소별로 계기번호 묶기
+    // 주소별 계기번호 묶기
     data.forEach((row) => {
       if (!grouped[row.주소]) grouped[row.주소] = [];
       grouped[row.주소].push(row);
@@ -122,7 +135,7 @@ function App() {
           });
           marker.setMap(map);
 
-          // 마커 클릭 이벤트
+          // ✅ 마커 클릭 시 팝업
           window.kakao.maps.event.addListener(marker, "click", () => {
             const content = `
               <div style="background:white; padding:10px; border-radius:8px; border:1px solid #ccc;">
@@ -143,14 +156,11 @@ function App() {
             });
             overlay.setMap(map);
 
-            // 버튼 클릭 이벤트 연결
+            // ✅ 버튼 이벤트
             setTimeout(() => {
-              document.getElementById("doneBtn").onclick = () =>
-                updateStatus(addr, "완료");
-              document.getElementById("failBtn").onclick = () =>
-                updateStatus(addr, "불가");
-              document.getElementById("todoBtn").onclick = () =>
-                updateStatus(addr, "미방문");
+              document.getElementById("doneBtn").onclick = () => updateStatus(addr, "완료");
+              document.getElementById("failBtn").onclick = () => updateStatus(addr, "불가");
+              document.getElementById("todoBtn").onclick = () => updateStatus(addr, "미방문");
             }, 100);
           });
         }
@@ -158,15 +168,14 @@ function App() {
     });
   }, [map, data]);
 
-  // 상태 업데이트
+  // ✅ 상태 업데이트 + Supabase 반영
   const updateStatus = async (addr, status) => {
-    const updated = data.map((d) =>
-      d.주소 === addr ? { ...d, 진행: status } : d
-    );
+    const updated = data.map((d) => (d.주소 === addr ? { ...d, 진행: status } : d));
     setData(updated);
     await supabase.from("meters").upsert(updated);
   };
 
+  // ✅ 로그인 화면
   if (!loggedIn) {
     return (
       <div style={{ padding: "40px", textAlign: "center" }}>
@@ -192,6 +201,7 @@ function App() {
     );
   }
 
+  // ✅ 지도 UI
   return (
     <div style={{ width: "100%", height: "100vh" }}>
       <div
