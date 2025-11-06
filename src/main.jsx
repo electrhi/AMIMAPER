@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import ReactDOM from "react-dom/client";
 import { createClient } from "@supabase/supabase-js";
 import * as XLSX from "xlsx";
@@ -15,40 +15,36 @@ function App() {
   const [data, setData] = useState([]);
   const [map, setMap] = useState(null);
   const [counts, setCounts] = useState({ 완료: 0, 불가: 0, 미방문: 0 });
+  const [userPosition, setUserPosition] = useState(null);
 
-  let activeOverlay = null;
-  let markers = [];
+  const activeOverlay = useRef(null);
+  const markers = useRef([]);
   const geoCache = JSON.parse(localStorage.getItem("geoCache") || "{}");
 
+  // ✅ 로그인
   const handleLogin = async (e) => {
     e.preventDefault();
     console.log("🔐 로그인 시도:", user);
-    const { data: users, error } = await supabase
-      .from("users")
-      .select("*")
-      .eq("id", user);
-    if (error) return console.error("❌ Supabase 오류:", error.message);
-
-    if (users && users.length > 0 && users[0].password === password) {
+    const { data: users, error } = await supabase.from("users").select("*").eq("id", user);
+    if (error) {
+      console.error("❌ Supabase 오류:", error.message);
+      return;
+    }
+    if (users?.length && users[0].password === password) {
       console.log("✅ 로그인 성공:", users[0]);
       await loadData(users[0].data_file);
       setLoggedIn(true);
-    } else {
-      alert("로그인 실패");
-    }
+    } else alert("로그인 실패");
   };
 
+  // ✅ 엑셀 + DB 병합
   const loadData = async (fileName) => {
     console.log("📂 엑셀 로드 시도:", fileName);
-    const { data: excelBlob, error } = await supabase.storage
-      .from("excels")
-      .download(fileName);
-    if (error) return console.error("❌ 엑셀 로드 실패:", error.message);
+    const { data: excelBlob } = await supabase.storage.from("excels").download(fileName);
     const blob = await excelBlob.arrayBuffer();
     const workbook = XLSX.read(blob, { type: "array" });
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     const json = XLSX.utils.sheet_to_json(sheet);
-    console.log("📊 엑셀 데이터:", json.length, "행");
 
     const baseData = json.map((r) => ({
       meter_id: r["계기번호"],
@@ -58,19 +54,18 @@ function App() {
 
     const { data: dbData } = await supabase.from("meters").select("*");
     const merged = baseData.map((x) => {
-      const m = dbData?.find(
+      const match = dbData?.find(
         (d) => d.meter_id === x.meter_id && d.address === x.address
       );
-      return m ? { ...x, status: m.status } : x;
+      return match ? { ...x, status: match.status } : x;
     });
 
-    console.log("✅ 병합 완료:", merged.length);
     setData(merged);
   };
 
+  // ✅ Kakao 지도 로드
   useEffect(() => {
     if (!loggedIn) return;
-    console.log("🗺️ Kakao 지도 스크립트 로드 중...");
     const script = document.createElement("script");
     script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${KAKAO_KEY}&autoload=false&libraries=services`;
     script.onload = () => {
@@ -79,45 +74,83 @@ function App() {
           document.getElementById("map"),
           {
             center: new window.kakao.maps.LatLng(37.5665, 126.9780),
-            level: 5,
+            level: 6,
           }
         );
-        console.log("✅ 지도 초기화 완료");
+        console.log("✅ Kakao 지도 초기화 완료");
         setMap(mapInstance);
       });
     };
     document.head.appendChild(script);
   }, [loggedIn]);
 
+  // ✅ GPS 위치 추적
+  useEffect(() => {
+    if (!map) return;
+    if (!navigator.geolocation) {
+      console.warn("⚠️ 이 브라우저는 위치 정보를 지원하지 않습니다.");
+      return;
+    }
+
+    const updateLocation = (pos) => {
+      const lat = pos.coords.latitude;
+      const lng = pos.coords.longitude;
+      setUserPosition({ lat, lng });
+
+      // 내 위치 마커 표시
+      if (!window.myLocationMarker) {
+        const marker = new window.kakao.maps.Marker({
+          position: new window.kakao.maps.LatLng(lat, lng),
+          map: map,
+          title: "내 위치",
+        });
+        window.myLocationMarker = marker;
+        const circle = new window.kakao.maps.Circle({
+          center: new window.kakao.maps.LatLng(lat, lng),
+          radius: 30,
+          strokeWeight: 2,
+          strokeColor: "#1E90FF",
+          strokeOpacity: 0.8,
+          fillColor: "#1E90FF",
+          fillOpacity: 0.3,
+        });
+        circle.setMap(map);
+        window.myLocationCircle = circle;
+      } else {
+        window.myLocationMarker.setPosition(new window.kakao.maps.LatLng(lat, lng));
+        window.myLocationCircle.setPosition(new window.kakao.maps.LatLng(lat, lng));
+      }
+    };
+
+    navigator.geolocation.watchPosition(updateLocation, (err) => {
+      console.error("❌ 위치 추적 오류:", err.message);
+    });
+  }, [map]);
+
+  // ✅ Geocoder (캐싱)
   const geocodeAddress = (geocoder, address) =>
     new Promise((resolve) => {
-      if (geoCache[address]) {
-        console.log(`💾 캐시 HIT: ${address}`);
-        return resolve(geoCache[address]);
-      }
+      if (geoCache[address]) return resolve(geoCache[address]);
       geocoder.addressSearch(address, (result, status) => {
         if (status === window.kakao.maps.services.Status.OK) {
           const lat = parseFloat(result[0].y).toFixed(4);
           const lng = parseFloat(result[0].x).toFixed(4);
           geoCache[address] = { lat, lng };
           localStorage.setItem("geoCache", JSON.stringify(geoCache));
-          console.log(`🌐 Geocode 성공: ${address} → (${lat}, ${lng})`);
           resolve({ lat, lng });
-        } else {
-          console.warn(`⚠️ 지오코딩 실패: ${address} → ${status}`);
-          resolve(null);
-        }
+        } else resolve(null);
       });
     });
 
+  // ✅ 마커 렌더링
   useEffect(() => {
-    if (!map || data.length === 0) return;
+    if (!map || !data.length) return;
     renderMarkers();
   }, [map, data]);
 
   const renderMarkers = async () => {
-    markers.forEach((m) => m.setMap(null));
-    markers = [];
+    markers.current.forEach((m) => m.setMap(null));
+    markers.current = [];
 
     const geocoder = new window.kakao.maps.services.Geocoder();
     const grouped = {};
@@ -161,13 +194,11 @@ function App() {
         yAnchor: 1,
       });
       overlay.setMap(map);
-      markers.push(overlay);
+      markers.current.push(overlay);
 
       markerEl.addEventListener("click", (e) => {
         e.stopPropagation();
-        console.log("🖱️ 마커 클릭됨:", list[0].address);
-
-        if (activeOverlay) activeOverlay.setMap(null);
+        if (activeOverlay.current) activeOverlay.current.setMap(null);
 
         const popupEl = document.createElement("div");
         popupEl.style.cssText = `
@@ -176,20 +207,9 @@ function App() {
           border:1px solid #ccc;
           border-radius:8px;
         `;
-
-        // 🛡️ 지도 클릭보다 우선하도록 이벤트 차단
-        popupEl.addEventListener("mousedown", (e) => {
-          console.log("🛡️ popupEl mousedown — 지도 이벤트 차단");
-          e.stopPropagation();
-        });
-        popupEl.addEventListener("touchstart", (e) => {
-          console.log("🛡️ popupEl touchstart — 지도 이벤트 차단");
-          e.stopPropagation();
-        });
-        popupEl.addEventListener("click", (e) => {
-          console.log("🛡️ popupEl click — 지도 이벤트 차단");
-          e.stopPropagation();
-        });
+        popupEl.addEventListener("mousedown", (e) => e.stopPropagation());
+        popupEl.addEventListener("touchstart", (e) => e.stopPropagation());
+        popupEl.addEventListener("click", (e) => e.stopPropagation());
 
         const title = document.createElement("b");
         title.textContent = list[0].address;
@@ -205,18 +225,14 @@ function App() {
 
         popupEl.appendChild(document.createElement("hr"));
 
-        const btns = ["완료", "불가", "미방문"];
-        btns.forEach((text) => {
+        ["완료", "불가", "미방문"].forEach((text) => {
           const btn = document.createElement("button");
           btn.textContent = text;
           btn.style.marginRight = "5px";
-          btn.addEventListener("mousedown", (e) => {
-            console.log(`🛡️ 버튼 mousedown 차단: ${text}`);
-            e.stopPropagation();
-          });
+          btn.addEventListener("mousedown", (e) => e.stopPropagation());
           btn.addEventListener("click", async (e) => {
             e.stopPropagation();
-            console.log(`🔘 ${text} 버튼 클릭됨 → ${list[0].address}`);
+            console.log(`🔘 ${text} 버튼 클릭`);
             await updateStatus(list.map((g) => g.meter_id), text);
           });
           popupEl.appendChild(btn);
@@ -229,36 +245,53 @@ function App() {
           zIndex: 10000,
         });
         popupOverlay.setMap(map);
-        activeOverlay = popupOverlay;
-        console.log("🧩 팝업 표시 완료:", list[0].address);
+        activeOverlay.current = popupOverlay;
       });
     });
 
-    // 🗺️ 지도 클릭 → 팝업 닫기
-    window.kakao.maps.event.addListener(map, "click", (mouseEvent) => {
-      console.log("🧩 지도 클릭 발생 — 팝업 닫기 시도");
-      if (activeOverlay) {
-        activeOverlay.setMap(null);
-        console.log("🧩 지도 클릭 — 팝업 닫기 실행");
-      }
+    window.kakao.maps.event.addListener(map, "click", () => {
+      if (activeOverlay.current) activeOverlay.current.setMap(null);
     });
   };
 
+  // ✅ Supabase 상태 업데이트
   const updateStatus = async (meterIds, newStatus) => {
-    console.log("🛠️ 상태 업데이트:", meterIds, "→", newStatus);
     const updated = data.map((d) =>
       meterIds.includes(d.meter_id) ? { ...d, status: newStatus } : d
     );
     setData(updated);
-
     const payload = updated.filter((d) => meterIds.includes(d.meter_id));
-    const { error } = await supabase.from("meters").upsert(payload, {
-      onConflict: ["meter_id", "address"],
-    });
-
-    if (error) console.error("❌ Supabase 저장 실패:", error.message);
-    else console.log("✅ Supabase 저장 완료");
+    await supabase.from("meters").upsert(payload, { onConflict: ["meter_id", "address"] });
+    console.log("✅ Supabase 저장 완료");
   };
+
+  // ✅ Realtime Sync
+  useEffect(() => {
+    if (!loggedIn) return;
+    console.log("🔄 Realtime 구독 시작");
+    const channel = supabase
+      .channel("public:meters")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "meters" },
+        (payload) => {
+          console.log("🛰️ 실시간 변경 감지:", payload);
+          setData((prev) =>
+            prev.map((d) =>
+              d.meter_id === payload.new.meter_id && d.address === payload.new.address
+                ? { ...d, status: payload.new.status }
+                : d
+            )
+          );
+        }
+      )
+      .subscribe();
+
+    return () => {
+      console.log("❎ Realtime 구독 해제");
+      supabase.removeChannel(channel);
+    };
+  }, [loggedIn]);
 
   if (!loggedIn)
     return (
