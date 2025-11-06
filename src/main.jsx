@@ -3,7 +3,7 @@ import ReactDOM from "react-dom/client";
 import { createClient } from "@supabase/supabase-js";
 import * as XLSX from "xlsx";
 
-// 🔧 환경변수
+// ✅ 환경변수
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_KEY;
 const KAKAO_KEY = import.meta.env.VITE_KAKAO_JAVASCRIPT_KEY;
@@ -21,17 +21,15 @@ function App() {
   let activeOverlay = null;
   let markers = [];
 
-  // ✅ 로그인 처리
+  // ✅ 로그인
   const handleLogin = async (e) => {
     e.preventDefault();
     console.log("🔐 로그인 시도:", user);
-
     const { data: users, error } = await supabase.from("users").select("*").eq("id", user);
     if (error) {
       console.error("❌ Supabase 오류:", error.message);
       return alert("Supabase 오류 발생");
     }
-
     if (users && users.length > 0 && users[0].password === password) {
       console.log("✅ 로그인 성공:", users[0]);
       await loadExcel(users[0].data_file);
@@ -42,19 +40,17 @@ function App() {
     }
   };
 
-  // ✅ Excel 로드
+  // ✅ 엑셀 로드
   const loadExcel = async (fileName) => {
     try {
       console.log("📂 엑셀 로드 시도:", fileName);
       const { data, error } = await supabase.storage.from("excels").download(fileName);
       if (error) throw error;
-
       const blob = await data.arrayBuffer();
       const workbook = XLSX.read(blob, { type: "array" });
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
       const json = XLSX.utils.sheet_to_json(sheet);
       console.log("📊 엑셀 데이터 로드 완료:", json.length, "행");
-
       setData(
         json.map((row) => ({
           계기번호: row["계기번호"],
@@ -72,7 +68,6 @@ function App() {
   useEffect(() => {
     if (!loggedIn) return;
     console.log("🗺️ Kakao 지도 스크립트 로드 중...");
-
     const script = document.createElement("script");
     script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${KAKAO_KEY}&autoload=false&libraries=services`;
     script.async = true;
@@ -97,7 +92,7 @@ function App() {
     renderMarkers();
   }, [map, data]);
 
-  // ✅ 마커 렌더링 함수
+  // ✅ 마커 렌더링
   const renderMarkers = () => {
     console.log("🧹 기존 마커 제거 중...");
     markers.forEach((m) => m.setMap && m.setMap(null));
@@ -124,7 +119,7 @@ function App() {
         const 진행 = group[0].진행;
         const color = 진행 === "완료" ? "green" : 진행 === "불가" ? "red" : "blue";
 
-        // ✅ 마커 (클릭 감지용)
+        // ✅ 마커
         const marker = new window.kakao.maps.Marker({ position: coords, map });
         markers.push(marker);
 
@@ -151,14 +146,20 @@ function App() {
         overlay.setMap(map);
         markers.push(overlay);
 
-        // ✅ 팝업 표시
+        // ✅ 팝업 생성
         const showPopup = () => {
           console.log(`🖱️ 마커 클릭됨: ${addr}`);
           if (activeOverlay) activeOverlay.setMap(null);
 
           const popupEl = document.createElement("div");
-          popupEl.style.cssText =
-            "background:white;padding:10px;border:1px solid #ccc;border-radius:8px;pointer-events:auto;";
+          popupEl.style.cssText = `
+            background:white;
+            padding:10px;
+            border:1px solid #ccc;
+            border-radius:8px;
+            pointer-events:auto;
+            box-shadow:0 2px 5px rgba(0,0,0,0.3);
+          `;
           popupEl.innerHTML = `
             <b>${addr}</b><br><br>
             ${group.map((g) => `<div>계기번호: ${g.계기번호}</div>`).join("")}
@@ -176,8 +177,15 @@ function App() {
           popupOverlay.setMap(map);
           activeOverlay = popupOverlay;
 
-          // ✅ 이벤트 버블링 방지
-          popupEl.addEventListener("click", (e) => e.stopPropagation());
+          // ✅ 클릭 이벤트 전파 방지 (mousedown + click)
+          popupEl.addEventListener("mousedown", (e) => {
+            e.stopPropagation();
+            console.log("🛡️ popupEl mousedown — 지도 이벤트 차단");
+          });
+          popupEl.addEventListener("click", (e) => {
+            e.stopPropagation();
+            console.log("🛡️ popupEl click — 지도 이벤트 차단");
+          });
 
           setTimeout(() => {
             const doneBtn = document.getElementById("doneBtn");
@@ -189,28 +197,24 @@ function App() {
               return;
             }
 
-            doneBtn.addEventListener("click", (e) => {
-              e.stopPropagation();
-              console.log("✅ 완료 버튼 클릭:", addr);
-              updateStatus(addr, "완료");
-            });
-
-            failBtn.addEventListener("click", (e) => {
-              e.stopPropagation();
-              console.log("❌ 불가 버튼 클릭:", addr);
-              updateStatus(addr, "불가");
-            });
-
-            todoBtn.addEventListener("click", (e) => {
-              e.stopPropagation();
-              console.log("🟦 미방문 버튼 클릭:", addr);
-              updateStatus(addr, "미방문");
+            [doneBtn, failBtn, todoBtn].forEach((btn) => {
+              btn.addEventListener("mousedown", (e) => {
+                e.stopPropagation();
+                console.log("🛡️ 버튼 mousedown 차단:", e.target.innerText);
+              });
+              btn.addEventListener("click", (e) => {
+                e.stopPropagation();
+                const label = e.target.innerText;
+                console.log(`🔘 ${label} 버튼 클릭 — ${addr}`);
+                if (label === "완료") updateStatus(addr, "완료");
+                else if (label === "불가") updateStatus(addr, "불가");
+                else if (label === "미방문") updateStatus(addr, "미방문");
+              });
             });
           }, 100);
         };
 
-        // ✅ 이벤트 등록 (문서: addListener 사용)
-        // https://apis.map.kakao.com/web/documentation/#Event
+        // ✅ 이벤트 등록
         overlayEl.addEventListener("click", (e) => {
           e.stopPropagation();
           showPopup();
@@ -221,15 +225,16 @@ function App() {
 
     // ✅ 지도 클릭 시 팝업 닫기
     window.kakao.maps.event.addListener(map, "click", () => {
+      console.log("🧩 지도 클릭 발생 — 팝업 닫기 시도");
       if (activeOverlay) {
-        console.log("🧩 지도 클릭 — 팝업 닫기");
+        console.log("🧩 지도 클릭 — 팝업 닫기 실행");
         activeOverlay.setMap(null);
         activeOverlay = null;
       }
     });
   };
 
-  // ✅ 상태 업데이트
+  // ✅ Supabase 상태 업데이트
   const updateStatus = async (addr, status) => {
     console.log(`🛠️ 상태 업데이트 시도: ${addr} → ${status}`);
     const updated = data.map((d) =>
