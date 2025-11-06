@@ -18,6 +18,7 @@ function App() {
   const [counts, setCounts] = useState({ 완료: 0, 불가: 0, 미방문: 0 });
 
   let activeOverlay = null;
+  let markers = []; // 지도에 표시된 마커 및 오버레이 저장
 
   // ✅ 로그인 처리
   const handleLogin = async (e) => {
@@ -70,9 +71,17 @@ function App() {
     document.head.appendChild(script);
   }, [loggedIn]);
 
-  // ✅ 지도 표시 및 마커 로직
+  // ✅ 지도 마커 렌더링 (React 상태 변화 감지)
   useEffect(() => {
     if (!map || data.length === 0) return;
+    renderMarkers();
+  }, [map, data]);
+
+  // ✅ 지도에 마커 표시 함수
+  const renderMarkers = () => {
+    // 기존 마커 및 오버레이 제거
+    markers.forEach((m) => m.setMap && m.setMap(null));
+    markers = [];
 
     const geocoder = new window.kakao.maps.services.Geocoder();
     const grouped = {};
@@ -93,10 +102,11 @@ function App() {
         const 진행 = group[0].진행;
         const color = 진행 === "완료" ? "green" : 진행 === "불가" ? "red" : "blue";
 
-        // ✅ (1) 마커 생성
+        // 마커 생성
         const marker = new window.kakao.maps.Marker({ position: coords, map });
+        markers.push(marker);
 
-        // ✅ (2) CustomOverlay 숫자 원
+        // 숫자 표시용 CustomOverlay
         const overlayEl = document.createElement("div");
         overlayEl.style.cssText = `
           background:${color};
@@ -111,15 +121,15 @@ function App() {
           pointer-events:auto;
         `;
         overlayEl.innerHTML = `${group.length}`;
-
         const overlay = new window.kakao.maps.CustomOverlay({
           position: coords,
           content: overlayEl,
           yAnchor: 1,
         });
         overlay.setMap(map);
+        markers.push(overlay);
 
-        // ✅ (3) 팝업 열기 함수
+        // 팝업 열기
         const showPopup = () => {
           if (activeOverlay) activeOverlay.setMap(null);
 
@@ -143,7 +153,7 @@ function App() {
           popupOverlay.setMap(map);
           activeOverlay = popupOverlay;
 
-          // ✅ 버튼 클릭 처리
+          // 버튼 클릭 이벤트
           popupEl.querySelector("#doneBtn").addEventListener("click", (e) => {
             e.stopPropagation();
             updateStatus(addr, "완료");
@@ -158,7 +168,7 @@ function App() {
           });
         };
 
-        // ✅ 숫자 원 클릭 / 마커 클릭 둘 다 팝업 열기
+        // 클릭 이벤트 등록
         overlayEl.addEventListener("click", (e) => {
           e.stopPropagation();
           showPopup();
@@ -167,21 +177,21 @@ function App() {
       });
     });
 
-    // ✅ 지도 클릭 시 팝업 닫기
+    // 지도 클릭 시 팝업 닫기
     window.kakao.maps.event.addListener(map, "click", () => {
       if (activeOverlay) {
         activeOverlay.setMap(null);
         activeOverlay = null;
       }
     });
-  }, [map, data]);
+  };
 
-  // ✅ 진행 상태 업데이트
+  // ✅ 상태 업데이트 (지도 리렌더링 포함)
   const updateStatus = async (addr, status) => {
     const updated = data.map((d) =>
       d.주소 === addr ? { ...d, 진행: status } : d
     );
-    setData(updated);
+    setData(updated); // 상태 변경 → 자동 리렌더링
     await supabase.from("meters").upsert(updated);
   };
 
@@ -210,6 +220,7 @@ function App() {
       </div>
     );
 
+  // ✅ 지도 UI
   return (
     <div style={{ width: "100%", height: "100vh" }}>
       <div
