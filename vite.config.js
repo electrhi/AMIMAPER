@@ -7,12 +7,9 @@ export default defineConfig({
   build: {
     outDir: "dist",
   },
-  server: {
-    port: 5173,
-  },
   preview: {
-    port: 10000, // ✅ Render에서 접근 가능한 포트
-    host: "0.0.0.0", // ✅ 외부 접근 허용
-    allowedHosts: ["amimaper.onrender.com"], // ✅ Render 배포 도메인 허용
+    port: 10000,                 // Render가 감지할 포트
+    host: "0.0.0.0",             // 외부 접근 허용
+    allowedHosts: ["amimaper.onrender.com"], // Render 도메인 허용
   },
 });
