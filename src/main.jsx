@@ -51,11 +51,12 @@ function App() {
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
       const json = XLSX.utils.sheet_to_json(sheet);
       console.log("📊 엑셀 데이터 로드 완료:", json.length, "행");
+
       setData(
         json.map((row) => ({
-          계기번호: row["계기번호"],
-          주소: row["주소"],
-          진행: row["진행"] || "미방문",
+          meter_id: row["계기번호"],
+          address: row["주소"],
+          status: row["진행"] || "미방문",
         }))
       );
     } catch (err) {
@@ -103,9 +104,9 @@ function App() {
     const statusCount = { 완료: 0, 불가: 0, 미방문: 0 };
 
     data.forEach((row) => {
-      if (!grouped[row.주소]) grouped[row.주소] = [];
-      grouped[row.주소].push(row);
-      statusCount[row.진행] = (statusCount[row.진행] || 0) + 1;
+      if (!grouped[row.address]) grouped[row.address] = [];
+      grouped[row.address].push(row);
+      statusCount[row.status] = (statusCount[row.status] || 0) + 1;
     });
     setCounts(statusCount);
 
@@ -116,12 +117,8 @@ function App() {
 
         const coords = new window.kakao.maps.LatLng(result[0].y, result[0].x);
         const group = grouped[addr];
-        const 진행 = group[0].진행;
+        const 진행 = group[0].status;
         const color = 진행 === "완료" ? "green" : 진행 === "불가" ? "red" : "blue";
-
-        // ✅ 마커
-        const marker = new window.kakao.maps.Marker({ position: coords, map });
-        markers.push(marker);
 
         // ✅ CustomOverlay (숫자 표시용)
         const overlayEl = document.createElement("div");
@@ -136,12 +133,24 @@ function App() {
           text-align:center;
           cursor:pointer;
           pointer-events:auto;
+          z-index:9999;
+          position:relative;
+          box-shadow:0 0 5px rgba(0,0,0,0.4);
+          transition:transform 0.2s;
         `;
         overlayEl.innerHTML = `${group.length}`;
+        overlayEl.addEventListener("mouseenter", () => {
+          overlayEl.style.transform = "scale(1.3)";
+        });
+        overlayEl.addEventListener("mouseleave", () => {
+          overlayEl.style.transform = "scale(1)";
+        });
+
         const overlay = new window.kakao.maps.CustomOverlay({
           position: coords,
           content: overlayEl,
           yAnchor: 1,
+          zIndex: 9999,
         });
         overlay.setMap(map);
         markers.push(overlay);
@@ -159,10 +168,11 @@ function App() {
             border-radius:8px;
             pointer-events:auto;
             box-shadow:0 2px 5px rgba(0,0,0,0.3);
+            z-index:10000;
           `;
           popupEl.innerHTML = `
             <b>${addr}</b><br><br>
-            ${group.map((g) => `<div>계기번호: ${g.계기번호}</div>`).join("")}
+            ${group.map((g) => `<div>계기번호: ${g.meter_id}</div>`).join("")}
             <hr/>
             <button id="doneBtn">완료</button>
             <button id="failBtn">불가</button>
@@ -173,35 +183,19 @@ function App() {
             position: coords,
             content: popupEl,
             yAnchor: 1.5,
+            zIndex: 10000,
           });
           popupOverlay.setMap(map);
           activeOverlay = popupOverlay;
 
-          // ✅ 클릭 이벤트 전파 방지 (mousedown + click)
-          popupEl.addEventListener("mousedown", (e) => {
-            e.stopPropagation();
-            console.log("🛡️ popupEl mousedown — 지도 이벤트 차단");
-          });
-          popupEl.addEventListener("click", (e) => {
-            e.stopPropagation();
-            console.log("🛡️ popupEl click — 지도 이벤트 차단");
-          });
+          popupEl.addEventListener("mousedown", (e) => e.stopPropagation());
+          popupEl.addEventListener("click", (e) => e.stopPropagation());
 
           setTimeout(() => {
-            const doneBtn = document.getElementById("doneBtn");
-            const failBtn = document.getElementById("failBtn");
-            const todoBtn = document.getElementById("todoBtn");
-
-            if (!doneBtn || !failBtn || !todoBtn) {
-              console.warn("⚠️ 버튼 요소를 찾을 수 없습니다!");
-              return;
-            }
-
-            [doneBtn, failBtn, todoBtn].forEach((btn) => {
-              btn.addEventListener("mousedown", (e) => {
-                e.stopPropagation();
-                console.log("🛡️ 버튼 mousedown 차단:", e.target.innerText);
-              });
+            ["doneBtn", "failBtn", "todoBtn"].forEach((id) => {
+              const btn = document.getElementById(id);
+              if (!btn) return;
+              btn.addEventListener("mousedown", (e) => e.stopPropagation());
               btn.addEventListener("click", (e) => {
                 e.stopPropagation();
                 const label = e.target.innerText;
@@ -214,12 +208,10 @@ function App() {
           }, 100);
         };
 
-        // ✅ 이벤트 등록
         overlayEl.addEventListener("click", (e) => {
           e.stopPropagation();
           showPopup();
         });
-        window.kakao.maps.event.addListener(marker, "click", showPopup);
       });
     });
 
@@ -227,7 +219,6 @@ function App() {
     window.kakao.maps.event.addListener(map, "click", () => {
       console.log("🧩 지도 클릭 발생 — 팝업 닫기 시도");
       if (activeOverlay) {
-        console.log("🧩 지도 클릭 — 팝업 닫기 실행");
         activeOverlay.setMap(null);
         activeOverlay = null;
       }
@@ -238,7 +229,7 @@ function App() {
   const updateStatus = async (addr, status) => {
     console.log(`🛠️ 상태 업데이트 시도: ${addr} → ${status}`);
     const updated = data.map((d) =>
-      d.주소 === addr ? { ...d, 진행: status } : d
+      d.address === addr ? { ...d, status } : d
     );
     setData(updated);
     const { error } = await supabase.from("meters").upsert(updated);
