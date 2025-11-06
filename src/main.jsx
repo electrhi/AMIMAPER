@@ -3,7 +3,6 @@ import ReactDOM from "react-dom/client";
 import { createClient } from "@supabase/supabase-js";
 import * as XLSX from "xlsx";
 
-// ✅ 환경변수
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_KEY;
 const KAKAO_KEY = import.meta.env.VITE_KAKAO_JAVASCRIPT_KEY;
@@ -20,22 +19,20 @@ function App() {
 
   let activeOverlay = null;
   let markers = [];
+  const geoCache = JSON.parse(localStorage.getItem("geoCache") || "{}");
 
   // ✅ 로그인
   const handleLogin = async (e) => {
     e.preventDefault();
     console.log("🔐 로그인 시도:", user);
     const { data: users, error } = await supabase.from("users").select("*").eq("id", user);
-    if (error) {
-      console.error("❌ Supabase 오류:", error.message);
-      return alert("Supabase 오류 발생");
-    }
+    if (error) return alert("Supabase 오류 발생");
+
     if (users && users.length > 0 && users[0].password === password) {
       console.log("✅ 로그인 성공:", users[0]);
       await loadExcel(users[0].data_file);
       setLoggedIn(true);
     } else {
-      console.warn("⚠️ 로그인 실패 — 사용자 또는 비밀번호 불일치");
       alert("로그인 실패: 아이디 또는 비밀번호 확인");
     }
   };
@@ -61,7 +58,6 @@ function App() {
       );
     } catch (err) {
       console.error("❌ 엑셀 로드 실패:", err.message);
-      alert("엑셀 로드 실패: " + err.message);
     }
   };
 
@@ -93,8 +89,31 @@ function App() {
     renderMarkers();
   }, [map, data]);
 
+  // ✅ 지오코더 캐싱 함수
+  const geocodeAddress = (geocoder, address) =>
+    new Promise((resolve) => {
+      if (geoCache[address]) {
+        console.log(`💾 캐시 HIT: ${address}`);
+        return resolve(geoCache[address]);
+      }
+
+      geocoder.addressSearch(address, (result, status) => {
+        if (status === window.kakao.maps.services.Status.OK) {
+          const lat = parseFloat(result[0].y).toFixed(4);
+          const lng = parseFloat(result[0].x).toFixed(4);
+          geoCache[address] = { lat, lng };
+          localStorage.setItem("geoCache", JSON.stringify(geoCache));
+          console.log(`🌐 API FETCH: ${address} → (${lat}, ${lng})`);
+          resolve({ lat, lng });
+        } else {
+          console.warn(`⚠️ 변환 실패: ${address} (${status})`);
+          resolve(null);
+        }
+      });
+    });
+
   // ✅ 마커 렌더링
-  const renderMarkers = () => {
+  const renderMarkers = async () => {
     console.log("🧹 기존 마커 제거 중...");
     markers.forEach((m) => m.setMap && m.setMap(null));
     markers = [];
@@ -103,121 +122,98 @@ function App() {
     const grouped = {};
     const statusCount = { 완료: 0, 불가: 0, 미방문: 0 };
 
-    data.forEach((row) => {
-      if (!grouped[row.address]) grouped[row.address] = [];
-      grouped[row.address].push(row);
-      statusCount[row.status] = (statusCount[row.status] || 0) + 1;
-    });
+    for (const d of data) statusCount[d.status] = (statusCount[d.status] || 0) + 1;
     setCounts(statusCount);
 
-    Object.keys(grouped).forEach((addr, index) => {
-      geocoder.addressSearch(addr, (result, status) => {
-        console.log(`📍 주소(${index + 1}): ${addr} → 상태: ${status}`);
-        if (status !== window.kakao.maps.services.Status.OK) return;
+    for (const row of data) {
+      const coords = await geocodeAddress(geocoder, row.address);
+      if (!coords) continue;
 
-        const coords = new window.kakao.maps.LatLng(result[0].y, result[0].x);
-        const group = grouped[addr];
-        const 진행 = group[0].status;
-        const color = 진행 === "완료" ? "green" : 진행 === "불가" ? "red" : "blue";
+      const coordKey = `${coords.lat},${coords.lng}`;
+      if (!grouped[coordKey]) grouped[coordKey] = { coords, list: [] };
+      grouped[coordKey].list.push(row);
+    }
 
-        // ✅ CustomOverlay (숫자 표시용)
-        const overlayEl = document.createElement("div");
-        overlayEl.style.cssText = `
-          background:${color};
-          border-radius:50%;
-          color:white;
-          font-size:12px;
-          width:30px;
-          height:30px;
-          line-height:30px;
-          text-align:center;
-          cursor:pointer;
-          pointer-events:auto;
-          z-index:9999;
-          position:relative;
-          box-shadow:0 0 5px rgba(0,0,0,0.4);
-          transition:transform 0.2s;
+    console.log(`📦 총 ${Object.keys(grouped).length}개의 좌표 그룹 생성`);
+
+    Object.keys(grouped).forEach((key) => {
+      const { coords, list } = grouped[key];
+      const 진행 = list[0].status;
+      const color = 진행 === "완료" ? "green" : 진행 === "불가" ? "red" : "blue";
+      const kakaoCoord = new window.kakao.maps.LatLng(coords.lat, coords.lng);
+
+      const overlayEl = document.createElement("div");
+      overlayEl.style.cssText = `
+        background:${color};
+        border-radius:50%;
+        color:white;
+        font-size:12px;
+        width:30px;
+        height:30px;
+        line-height:30px;
+        text-align:center;
+        cursor:pointer;
+        z-index:9999;
+        box-shadow:0 0 5px rgba(0,0,0,0.4);
+      `;
+      overlayEl.innerHTML = `${list.length}`;
+
+      const overlay = new window.kakao.maps.CustomOverlay({
+        position: kakaoCoord,
+        content: overlayEl,
+        yAnchor: 1,
+        zIndex: 9999,
+      });
+      overlay.setMap(map);
+      markers.push(overlay);
+
+      // 팝업
+      overlayEl.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (activeOverlay) activeOverlay.setMap(null);
+
+        const popupEl = document.createElement("div");
+        popupEl.style.cssText = `
+          background:white;
+          padding:10px;
+          border:1px solid #ccc;
+          border-radius:8px;
+          box-shadow:0 2px 5px rgba(0,0,0,0.3);
+          z-index:10000;
         `;
-        overlayEl.innerHTML = `${group.length}`;
-        overlayEl.addEventListener("mouseenter", () => {
-          overlayEl.style.transform = "scale(1.3)";
+        popupEl.innerHTML = `
+          <b>${list[0].address}</b><br><br>
+          ${list.map((g) => `<div>계기번호: ${g.meter_id}</div>`).join("")}
+          <hr/>
+          <button id="doneBtn">완료</button>
+          <button id="failBtn">불가</button>
+          <button id="todoBtn">미방문</button>
+        `;
+
+        const popupOverlay = new window.kakao.maps.CustomOverlay({
+          position: kakaoCoord,
+          content: popupEl,
+          yAnchor: 1.5,
+          zIndex: 10000,
         });
-        overlayEl.addEventListener("mouseleave", () => {
-          overlayEl.style.transform = "scale(1)";
-        });
+        popupOverlay.setMap(map);
+        activeOverlay = popupOverlay;
 
-        const overlay = new window.kakao.maps.CustomOverlay({
-          position: coords,
-          content: overlayEl,
-          yAnchor: 1,
-          zIndex: 9999,
-        });
-        overlay.setMap(map);
-        markers.push(overlay);
-
-        // ✅ 팝업 생성
-        const showPopup = () => {
-          console.log(`🖱️ 마커 클릭됨: ${addr}`);
-          if (activeOverlay) activeOverlay.setMap(null);
-
-          const popupEl = document.createElement("div");
-          popupEl.style.cssText = `
-            background:white;
-            padding:10px;
-            border:1px solid #ccc;
-            border-radius:8px;
-            pointer-events:auto;
-            box-shadow:0 2px 5px rgba(0,0,0,0.3);
-            z-index:10000;
-          `;
-          popupEl.innerHTML = `
-            <b>${addr}</b><br><br>
-            ${group.map((g) => `<div>계기번호: ${g.meter_id}</div>`).join("")}
-            <hr/>
-            <button id="doneBtn">완료</button>
-            <button id="failBtn">불가</button>
-            <button id="todoBtn">미방문</button>
-          `;
-
-          const popupOverlay = new window.kakao.maps.CustomOverlay({
-            position: coords,
-            content: popupEl,
-            yAnchor: 1.5,
-            zIndex: 10000,
+        ["doneBtn", "failBtn", "todoBtn"].forEach((id) => {
+          const btn = popupEl.querySelector(`#${id}`);
+          if (!btn) return;
+          btn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const label = e.target.innerText;
+            const newStatus =
+              label === "완료" ? "완료" : label === "불가" ? "불가" : "미방문";
+            updateStatus(list.map((g) => g.address), newStatus);
           });
-          popupOverlay.setMap(map);
-          activeOverlay = popupOverlay;
-
-          popupEl.addEventListener("mousedown", (e) => e.stopPropagation());
-          popupEl.addEventListener("click", (e) => e.stopPropagation());
-
-          setTimeout(() => {
-            ["doneBtn", "failBtn", "todoBtn"].forEach((id) => {
-              const btn = document.getElementById(id);
-              if (!btn) return;
-              btn.addEventListener("mousedown", (e) => e.stopPropagation());
-              btn.addEventListener("click", (e) => {
-                e.stopPropagation();
-                const label = e.target.innerText;
-                console.log(`🔘 ${label} 버튼 클릭 — ${addr}`);
-                if (label === "완료") updateStatus(addr, "완료");
-                else if (label === "불가") updateStatus(addr, "불가");
-                else if (label === "미방문") updateStatus(addr, "미방문");
-              });
-            });
-          }, 100);
-        };
-
-        overlayEl.addEventListener("click", (e) => {
-          e.stopPropagation();
-          showPopup();
         });
       });
     });
 
-    // ✅ 지도 클릭 시 팝업 닫기
     window.kakao.maps.event.addListener(map, "click", () => {
-      console.log("🧩 지도 클릭 발생 — 팝업 닫기 시도");
       if (activeOverlay) {
         activeOverlay.setMap(null);
         activeOverlay = null;
@@ -225,11 +221,11 @@ function App() {
     });
   };
 
-  // ✅ Supabase 상태 업데이트
-  const updateStatus = async (addr, status) => {
-    console.log(`🛠️ 상태 업데이트 시도: ${addr} → ${status}`);
+  // ✅ 상태 업데이트
+  const updateStatus = async (addrList, status) => {
+    console.log(`🛠️ 상태 업데이트 시도 (${addrList.length}개) → ${status}`);
     const updated = data.map((d) =>
-      d.address === addr ? { ...d, status } : d
+      addrList.includes(d.address) ? { ...d, status } : d
     );
     setData(updated);
     const { error } = await supabase.from("meters").upsert(updated);
@@ -237,7 +233,6 @@ function App() {
     else console.log("✅ Supabase 업데이트 성공");
   };
 
-  // ✅ 로그인 UI
   if (!loggedIn)
     return (
       <div style={{ padding: "40px", textAlign: "center" }}>
@@ -262,7 +257,6 @@ function App() {
       </div>
     );
 
-  // ✅ 지도 UI
   return (
     <div style={{ width: "100%", height: "100vh" }}>
       <div
