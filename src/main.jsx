@@ -3,10 +3,10 @@ import ReactDOM from "react-dom/client";
 import { createClient } from "@supabase/supabase-js";
 import * as XLSX from "xlsx";
 
-const SUPABASE_URL = import.meta.env.SUPABASE_URL || process.env.SUPABASE_URL;
-const SUPABASE_KEY = import.meta.env.SUPABASE_KEY || process.env.SUPABASE_KEY;
-const KAKAO_JS_KEY = import.meta.env.KAKAO_JAVASCRIPT_KEY || process.env.KAKAO_JAVASCRIPT_KEY;
-const KAKAO_REST_KEY = import.meta.env.KAKAO_REST_API_KEY || process.env.KAKAO_REST_API_KEY;
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_KEY;
+const KAKAO_JS_KEY = import.meta.env.VITE_KAKAO_JAVASCRIPT_KEY;
+const KAKAO_REST_KEY = import.meta.env.VITE_KAKAO_REST_API_KEY;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
