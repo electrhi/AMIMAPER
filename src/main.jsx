@@ -6,7 +6,6 @@ import * as XLSX from "xlsx";
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_KEY;
 const KAKAO_KEY = import.meta.env.VITE_KAKAO_JAVASCRIPT_KEY;
-
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 function App() {
@@ -40,40 +39,30 @@ function App() {
     }
   };
 
-  // ✅ 데이터 로드 (엑셀 + Supabase 병합)
+  // ✅ 엑셀 + DB 병합
   const loadData = async (fileName) => {
     console.log("📂 엑셀 로드 시도:", fileName);
-    const { data: excelBlob, error: excelError } = await supabase.storage
-      .from("excels")
-      .download(fileName);
-    if (excelError) throw excelError;
-
+    const { data: excelBlob } = await supabase.storage.from("excels").download(fileName);
     const blob = await excelBlob.arrayBuffer();
     const workbook = XLSX.read(blob, { type: "array" });
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     const json = XLSX.utils.sheet_to_json(sheet);
 
-    const baseData = json.map((row) => ({
-      meter_id: row["계기번호"],
-      address: row["주소"],
-      status: row["진행"] || "미방문",
+    const baseData = json.map((r) => ({
+      meter_id: r["계기번호"],
+      address: r["주소"],
+      status: r["진행"] || "미방문",
     }));
 
     console.log("📊 엑셀 데이터 로드 완료:", baseData.length, "행");
+    const { data: dbData } = await supabase.from("meters").select("*");
 
-    const { data: dbData, error: dbError } = await supabase
-      .from("meters")
-      .select("*");
-    if (dbError) console.warn("⚠️ DB 데이터 불러오기 실패:", dbError.message);
-
-    // DB에 저장된 상태 우선 적용
     const merged = baseData.map((x) => {
       const match = dbData?.find(
         (d) => d.meter_id === x.meter_id && d.address === x.address
       );
       return match ? { ...x, status: match.status } : x;
     });
-
     setData(merged);
   };
 
@@ -97,20 +86,16 @@ function App() {
     document.head.appendChild(script);
   }, [loggedIn]);
 
-  // ✅ Kakao Geocoder (캐싱 포함)
+  // ✅ Geocoder 캐싱
   const geocodeAddress = (geocoder, address) =>
     new Promise((resolve) => {
-      if (geoCache[address]) {
-        console.log(`💾 캐시 HIT: ${address}`);
-        return resolve(geoCache[address]);
-      }
+      if (geoCache[address]) return resolve(geoCache[address]);
       geocoder.addressSearch(address, (result, status) => {
         if (status === window.kakao.maps.services.Status.OK) {
           const lat = parseFloat(result[0].y).toFixed(4);
           const lng = parseFloat(result[0].x).toFixed(4);
           geoCache[address] = { lat, lng };
           localStorage.setItem("geoCache", JSON.stringify(geoCache));
-          console.log(`🌐 API FETCH: ${address} → (${lat}, ${lng})`);
           resolve({ lat, lng });
         } else resolve(null);
       });
@@ -204,7 +189,8 @@ function App() {
         ["doneBtn", "failBtn", "todoBtn"].forEach((id) => {
           const btn = popupEl.querySelector(`#${id}`);
           if (!btn) return;
-          btn.addEventListener("click", async () => {
+          btn.addEventListener("click", async (event) => {
+            event.stopPropagation(); // ✅ 클릭 이벤트 전파 차단
             const newStatus =
               id === "doneBtn" ? "완료" : id === "failBtn" ? "불가" : "미방문";
             await updateStatus(list.map((g) => g.meter_id), newStatus);
@@ -218,23 +204,22 @@ function App() {
     });
   };
 
-  // ✅ 상태 업데이트 (Supabase + 즉시 반영)
+  // ✅ 상태 업데이트
   const updateStatus = async (meterIds, newStatus) => {
     console.log("🛠️ 상태 변경:", meterIds, "→", newStatus);
     const updated = data.map((d) =>
       meterIds.includes(d.meter_id) ? { ...d, status: newStatus } : d
     );
     setData(updated);
-
     const payload = updated.filter((d) => meterIds.includes(d.meter_id));
+
     const { error } = await supabase.from("meters").upsert(payload, {
       onConflict: ["meter_id", "address"],
     });
 
     if (error) console.error("❌ Supabase 저장 실패:", error.message);
     else console.log("✅ Supabase 저장 완료");
-
-    renderMarkers(); // ✅ 즉시 재렌더링
+    renderMarkers();
   };
 
   if (!loggedIn)
@@ -242,11 +227,7 @@ function App() {
       <div style={{ textAlign: "center", marginTop: "100px" }}>
         <h2>로그인</h2>
         <form onSubmit={handleLogin}>
-          <input
-            value={user}
-            onChange={(e) => setUser(e.target.value)}
-            placeholder="아이디"
-          />
+          <input value={user} onChange={(e) => setUser(e.target.value)} placeholder="아이디" />
           <br />
           <input
             type="password"
@@ -261,21 +242,25 @@ function App() {
     );
 
   return (
-    <div style={{ width: "100%", height: "100vh" }}>
+    <div style={{ width: "100%", height: "100vh", position: "relative" }}>
+      {/* ✅ 상태바 항상 최상단 */}
       <div
         style={{
           position: "absolute",
           top: 10,
           left: 10,
           background: "white",
-          padding: "5px 10px",
+          padding: "8px 12px",
           borderRadius: "8px",
           boxShadow: "0 2px 5px rgba(0,0,0,0.2)",
+          zIndex: 99999, // ✅ 지도보다 위로
+          fontWeight: "bold",
         }}
       >
         ✅ 완료: {counts["완료"] || 0} | ❌ 불가: {counts["불가"] || 0} | 🟦 미방문:{" "}
         {counts["미방문"] || 0}
       </div>
+
       <div id="map" style={{ width: "100%", height: "100vh" }}></div>
     </div>
   );
