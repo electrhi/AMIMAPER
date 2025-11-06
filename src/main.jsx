@@ -39,7 +39,7 @@ function App() {
     }
   };
 
-  // ✅ 엑셀 + DB 병합
+  // ✅ 데이터 로드
   const loadData = async (fileName) => {
     console.log("📂 엑셀 로드 시도:", fileName);
     const { data: excelBlob } = await supabase.storage.from("excels").download(fileName);
@@ -133,8 +133,8 @@ function App() {
       const color = 진행 === "완료" ? "green" : 진행 === "불가" ? "red" : "blue";
       const kakaoCoord = new window.kakao.maps.LatLng(coords.lat, coords.lng);
 
-      const overlayEl = document.createElement("div");
-      overlayEl.style.cssText = `
+      const markerEl = document.createElement("div");
+      markerEl.style.cssText = `
         background:${color};
         border-radius:50%;
         color:white;
@@ -146,18 +146,17 @@ function App() {
         cursor:pointer;
         box-shadow:0 0 5px rgba(0,0,0,0.4);
       `;
-      overlayEl.innerHTML = `${list.length}`;
+      markerEl.textContent = list.length;
 
       const overlay = new window.kakao.maps.CustomOverlay({
         position: kakaoCoord,
-        content: overlayEl,
+        content: markerEl,
         yAnchor: 1,
-        zIndex: 9999,
       });
       overlay.setMap(map);
       markers.push(overlay);
 
-      overlayEl.addEventListener("click", (e) => {
+      markerEl.addEventListener("click", (e) => {
         e.stopPropagation();
         if (activeOverlay) activeOverlay.setMap(null);
 
@@ -168,14 +167,36 @@ function App() {
           border:1px solid #ccc;
           border-radius:8px;
         `;
-        popupEl.innerHTML = `
-          <b>${list[0].address}</b><br><br>
-          ${list.map((g) => `<div>계기번호: ${g.meter_id}</div>`).join("")}
-          <hr/>
-          <button id="doneBtn">완료</button>
-          <button id="failBtn">불가</button>
-          <button id="todoBtn">미방문</button>
-        `;
+        const title = document.createElement("b");
+        title.textContent = list[0].address;
+        popupEl.appendChild(title);
+        popupEl.appendChild(document.createElement("br"));
+        popupEl.appendChild(document.createElement("br"));
+        list.forEach((g) => {
+          const div = document.createElement("div");
+          div.textContent = `계기번호: ${g.meter_id}`;
+          popupEl.appendChild(div);
+        });
+
+        const hr = document.createElement("hr");
+        popupEl.appendChild(hr);
+
+        const btns = [
+          { id: "doneBtn", text: "완료" },
+          { id: "failBtn", text: "불가" },
+          { id: "todoBtn", text: "미방문" },
+        ];
+        btns.forEach((b) => {
+          const btn = document.createElement("button");
+          btn.textContent = b.text;
+          btn.style.marginRight = "5px";
+          btn.addEventListener("click", async (ev) => {
+            ev.stopPropagation();
+            const newStatus = b.text;
+            await updateStatus(list.map((g) => g.meter_id), newStatus);
+          });
+          popupEl.appendChild(btn);
+        });
 
         const popupOverlay = new window.kakao.maps.CustomOverlay({
           position: kakaoCoord,
@@ -185,17 +206,6 @@ function App() {
         });
         popupOverlay.setMap(map);
         activeOverlay = popupOverlay;
-
-        ["doneBtn", "failBtn", "todoBtn"].forEach((id) => {
-          const btn = popupEl.querySelector(`#${id}`);
-          if (!btn) return;
-          btn.addEventListener("click", async (event) => {
-            event.stopPropagation(); // ✅ 클릭 이벤트 전파 차단
-            const newStatus =
-              id === "doneBtn" ? "완료" : id === "failBtn" ? "불가" : "미방문";
-            await updateStatus(list.map((g) => g.meter_id), newStatus);
-          });
-        });
       });
     });
 
@@ -243,7 +253,6 @@ function App() {
 
   return (
     <div style={{ width: "100%", height: "100vh", position: "relative" }}>
-      {/* ✅ 상태바 항상 최상단 */}
       <div
         style={{
           position: "absolute",
@@ -253,14 +262,13 @@ function App() {
           padding: "8px 12px",
           borderRadius: "8px",
           boxShadow: "0 2px 5px rgba(0,0,0,0.2)",
-          zIndex: 99999, // ✅ 지도보다 위로
+          zIndex: 99999,
           fontWeight: "bold",
         }}
       >
         ✅ 완료: {counts["완료"] || 0} | ❌ 불가: {counts["불가"] || 0} | 🟦 미방문:{" "}
         {counts["미방문"] || 0}
       </div>
-
       <div id="map" style={{ width: "100%", height: "100vh" }}></div>
     </div>
   );
