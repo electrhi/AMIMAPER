@@ -3,7 +3,7 @@ import ReactDOM from "react-dom/client";
 import { createClient } from "@supabase/supabase-js";
 import * as XLSX from "xlsx";
 
-// 🧩 Supabase + Kakao 설정
+// 🔧 환경변수
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_KEY;
 const KAKAO_KEY = import.meta.env.VITE_KAKAO_JAVASCRIPT_KEY;
@@ -90,7 +90,7 @@ function App() {
     document.head.appendChild(script);
   }, [loggedIn]);
 
-  // ✅ 지도 데이터 렌더링
+  // ✅ 지도 렌더링
   useEffect(() => {
     if (!map || data.length === 0) return;
     console.log("🧭 지도 렌더링 시작 — 데이터 행 수:", data.length);
@@ -117,17 +117,18 @@ function App() {
     Object.keys(grouped).forEach((addr, index) => {
       geocoder.addressSearch(addr, (result, status) => {
         console.log(`📍 주소(${index + 1}): ${addr} → 상태: ${status}`);
-
         if (status !== window.kakao.maps.services.Status.OK) return;
+
         const coords = new window.kakao.maps.LatLng(result[0].y, result[0].x);
         const group = grouped[addr];
         const 진행 = group[0].진행;
         const color = 진행 === "완료" ? "green" : 진행 === "불가" ? "red" : "blue";
 
+        // ✅ 마커 (클릭 감지용)
         const marker = new window.kakao.maps.Marker({ position: coords, map });
         markers.push(marker);
 
-        // CustomOverlay 생성
+        // ✅ CustomOverlay (숫자 표시용)
         const overlayEl = document.createElement("div");
         overlayEl.style.cssText = `
           background:${color};
@@ -150,14 +151,14 @@ function App() {
         overlay.setMap(map);
         markers.push(overlay);
 
-        // 팝업 열기
+        // ✅ 팝업 표시
         const showPopup = () => {
           console.log(`🖱️ 마커 클릭됨: ${addr}`);
           if (activeOverlay) activeOverlay.setMap(null);
 
           const popupEl = document.createElement("div");
           popupEl.style.cssText =
-            "background:white;padding:10px;border:1px solid #ccc;border-radius:8px;";
+            "background:white;padding:10px;border:1px solid #ccc;border-radius:8px;pointer-events:auto;";
           popupEl.innerHTML = `
             <b>${addr}</b><br><br>
             ${group.map((g) => `<div>계기번호: ${g.계기번호}</div>`).join("")}
@@ -175,6 +176,9 @@ function App() {
           popupOverlay.setMap(map);
           activeOverlay = popupOverlay;
 
+          // ✅ 이벤트 버블링 방지
+          popupEl.addEventListener("click", (e) => e.stopPropagation());
+
           setTimeout(() => {
             const doneBtn = document.getElementById("doneBtn");
             const failBtn = document.getElementById("failBtn");
@@ -185,24 +189,28 @@ function App() {
               return;
             }
 
-            doneBtn.onclick = (e) => {
+            doneBtn.addEventListener("click", (e) => {
               e.stopPropagation();
               console.log("✅ 완료 버튼 클릭:", addr);
               updateStatus(addr, "완료");
-            };
-            failBtn.onclick = (e) => {
+            });
+
+            failBtn.addEventListener("click", (e) => {
               e.stopPropagation();
               console.log("❌ 불가 버튼 클릭:", addr);
               updateStatus(addr, "불가");
-            };
-            todoBtn.onclick = (e) => {
+            });
+
+            todoBtn.addEventListener("click", (e) => {
               e.stopPropagation();
               console.log("🟦 미방문 버튼 클릭:", addr);
               updateStatus(addr, "미방문");
-            };
+            });
           }, 100);
         };
 
+        // ✅ 이벤트 등록 (문서: addListener 사용)
+        // https://apis.map.kakao.com/web/documentation/#Event
         overlayEl.addEventListener("click", (e) => {
           e.stopPropagation();
           showPopup();
@@ -211,6 +219,7 @@ function App() {
       });
     });
 
+    // ✅ 지도 클릭 시 팝업 닫기
     window.kakao.maps.event.addListener(map, "click", () => {
       if (activeOverlay) {
         console.log("🧩 지도 클릭 — 팝업 닫기");
