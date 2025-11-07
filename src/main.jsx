@@ -21,6 +21,7 @@ function App() {
   const activeOverlay = useRef(null);
   const markers = useRef([]);
   const geoCache = JSON.parse(localStorage.getItem("geoCache") || "{}");
+  const userMarker = useRef(null);
 
   // ✅ 로그인
   const handleLogin = async (e) => {
@@ -97,9 +98,10 @@ function App() {
     document.head.appendChild(script);
   }, [loggedIn]);
 
-  // ✅ GPS 위치 추적
+  // ✅ GPS 위치 추적 + 아이디 마커 표시
   useEffect(() => {
-    if (!map) return;
+    if (!map || !loggedIn) return;
+
     if (!navigator.geolocation) {
       console.warn("⚠️ 이 브라우저는 위치 정보를 지원하지 않습니다.");
       return;
@@ -110,22 +112,46 @@ function App() {
       const lng = pos.coords.longitude;
       setUserPosition({ lat, lng });
 
-      if (!window.myLocationMarker) {
-        const marker = new window.kakao.maps.Marker({
-          position: new window.kakao.maps.LatLng(lat, lng),
-          map: map,
-          title: "내 위치",
+      // 커스텀 마커 내용
+      const markerContent = document.createElement("div");
+      markerContent.innerHTML = `
+        <div style="
+          background:#3182f6;
+          color:white;
+          border:2px solid white;
+          border-radius:15px;
+          padding:3px 8px;
+          font-size:13px;
+          font-weight:bold;
+          box-shadow:0 0 5px rgba(0,0,0,0.3);
+          white-space:nowrap;
+        ">
+          📍 ${user}
+        </div>
+      `;
+
+      const position = new window.kakao.maps.LatLng(lat, lng);
+
+      if (!userMarker.current) {
+        // 처음 한 번만 생성
+        userMarker.current = new window.kakao.maps.CustomOverlay({
+          position,
+          content: markerContent,
+          yAnchor: 1.3,
+          zIndex: 99999,
         });
-        window.myLocationMarker = marker;
+        userMarker.current.setMap(map);
+        console.log(`🧭 ${user} 위치 마커 생성 완료`);
       } else {
-        window.myLocationMarker.setPosition(new window.kakao.maps.LatLng(lat, lng));
+        // 위치 갱신
+        userMarker.current.setPosition(position);
       }
     };
 
     navigator.geolocation.watchPosition(updateLocation, (err) => {
       console.error("❌ 위치 추적 오류:", err.message);
     });
-  }, [map]);
+  }, [map, loggedIn, user]);
 
   // ✅ Geocoder (캐싱)
   const geocodeAddress = (geocoder, address) =>
@@ -198,15 +224,11 @@ function App() {
 
       markerEl.addEventListener("click", async (e) => {
         e.stopPropagation();
-
-        // ✅ 마커 클릭 시 DB 최신화 실행
         console.log("🧭 마커 클릭 → DB 새로고침 실행");
         await loadDataFromDB();
 
-        // ✅ 기존 팝업 닫기
         if (activeOverlay.current) activeOverlay.current.setMap(null);
 
-        // ✅ 새 팝업 표시
         const popupEl = document.createElement("div");
         popupEl.style.cssText = `
           background:white;
@@ -215,7 +237,6 @@ function App() {
           border-radius:8px;
         `;
         popupEl.addEventListener("mousedown", (e) => e.stopPropagation());
-        popupEl.addEventListener("touchstart", (e) => e.stopPropagation());
         popupEl.addEventListener("click", (e) => e.stopPropagation());
 
         const title = document.createElement("b");
@@ -236,7 +257,6 @@ function App() {
           const btn = document.createElement("button");
           btn.textContent = text;
           btn.style.marginRight = "5px";
-          btn.addEventListener("mousedown", (e) => e.stopPropagation());
           btn.addEventListener("click", async (e) => {
             e.stopPropagation();
             console.log(`🔘 ${text} 버튼 클릭`);
