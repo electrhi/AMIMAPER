@@ -64,20 +64,47 @@ function App() {
     setData(merged);
   };
 
+  // ✅ Kakao 주소 → 좌표
+  const geocodeAddress = (geocoder, address) =>
+    new Promise((resolve) => {
+      if (geoCache[address]) {
+        console.log(`💾 캐시 HIT: ${address}`);
+        return resolve(geoCache[address]);
+      }
+      geocoder.addressSearch(address, (result, status) => {
+        if (status === window.kakao.maps.services.Status.OK) {
+          const lat = parseFloat(result[0].y);
+          const lng = parseFloat(result[0].x);
+          geoCache[address] = { lat, lng };
+          localStorage.setItem("geoCache", JSON.stringify(geoCache));
+          resolve({ lat, lng });
+        } else {
+          console.warn(`⚠️ 지오코딩 실패: ${address} (${status})`);
+          delete geoCache[address];
+          resolve(null);
+        }
+      });
+    });
+
   // ✅ 지도 초기화
   useEffect(() => {
     if (!loggedIn) return;
+    console.log("🗺️ Kakao SDK 로드 시작...");
     const script = document.createElement("script");
     script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${KAKAO_KEY}&autoload=false&libraries=services,clusterer`;
     script.onload = () => {
-      window.kakao.maps.load(initMap);
+      console.log("📦 Kakao SDK 로드 완료");
+      window.kakao.maps.load(() => {
+        console.log("🧭 지도 초기화 시작");
+        initMap();
+      });
     };
     document.head.appendChild(script);
   }, [loggedIn]);
 
   const initMap = () => {
-    const container = document.getElementById("map");
-    const mapInstance = new window.kakao.maps.Map(container, {
+    const mapContainer = document.getElementById("map");
+    const mapInstance = new window.kakao.maps.Map(mapContainer, {
       center: new window.kakao.maps.LatLng(36.3504, 127.3845),
       level: 6,
       mapTypeId:
@@ -87,19 +114,20 @@ function App() {
     });
     setMap(mapInstance);
 
+    // 클러스터러 설정
     clusterer.current = new window.kakao.maps.MarkerClusterer({
       map: mapInstance,
       averageCenter: true,
       minLevel: 5,
     });
 
-    // ✅ 클러스터 클릭 시 확대
+    // 클러스터 클릭 시 확대
     window.kakao.maps.event.addListener(clusterer.current, "clusterclick", (cluster) => {
       const level = mapInstance.getLevel() - 1;
       mapInstance.setLevel(level, { anchor: cluster.getCenter() });
     });
 
-    // ✅ 지도 클릭 시 팝업 닫기
+    // 지도 클릭 시 팝업 닫기
     window.kakao.maps.event.addListener(mapInstance, "click", () => {
       if (activeOverlay.current) {
         activeOverlay.current.setMap(null);
@@ -107,7 +135,7 @@ function App() {
       }
     });
 
-    // ✅ 내 위치 중심 이동
+    // 내 위치로 이동
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition((pos) => {
         const lat = pos.coords.latitude;
@@ -118,11 +146,11 @@ function App() {
       });
     }
 
-    // ✅ 관리자일 경우 타 유저 위치 불러오기
     if (canViewOthers) loadOtherUserLocations(mapInstance);
+    renderMarkers(mapInstance);
   };
 
-  // ✅ 내 위치 마커
+  // ✅ 내 위치 표시
   const showMyLocationMarker = (lat, lng, mapInstance) => {
     const content = document.createElement("div");
     content.innerHTML = `<div style="background:#3182f6;color:white;border-radius:15px;padding:3px 8px;font-size:13px;font-weight:bold;">📍 ${user}</div>`;
@@ -137,7 +165,7 @@ function App() {
     } else userMarker.current.setPosition(position);
   };
 
-  // ✅ 다른 유저 위치 표시 (관리자용)
+  // ✅ 다른 유저 위치 표시
   const loadOtherUserLocations = async (mapInstance) => {
     const { data: locs } = await supabase.from("user_locations").select("*");
     otherUserMarkers.current.forEach((m) => m.setMap(null));
@@ -156,17 +184,11 @@ function App() {
         marker.setMap(mapInstance);
         otherUserMarkers.current.push(marker);
       });
-
-    console.log("👥 타 유저 위치 마커 수:", otherUserMarkers.current.length);
   };
 
   // ✅ 마커 렌더링
-  useEffect(() => {
-    if (!map || !data.length) return;
-    renderMarkers();
-  }, [map, data]);
-
-  const renderMarkers = async () => {
+  const renderMarkers = async (mapInstance = map) => {
+    if (!mapInstance || !data.length) return;
     const geocoder = new window.kakao.maps.services.Geocoder();
     const newMarkers = [];
 
@@ -182,9 +204,10 @@ function App() {
 
     clusterer.current.clear();
     clusterer.current.addMarkers(newMarkers);
+    console.log("📍 마커 수:", newMarkers.length);
   };
 
-  // ✅ 팝업 열기
+  // ✅ 팝업
   const openPopup = (row, position) => {
     if (activeOverlay.current) activeOverlay.current.setMap(null);
 
@@ -285,6 +308,7 @@ function App() {
         )}
       </div>
 
+      {/* 항상 표시 */}
       <div
         style={{
           position: "absolute",
