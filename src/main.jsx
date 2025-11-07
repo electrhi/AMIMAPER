@@ -66,7 +66,7 @@ function App() {
     setData(merged);
   };
 
-  // ✅ DB 최신 상태만 불러오기
+  // ✅ DB 최신 상태 불러오기
   const loadDataFromDB = async () => {
     console.log("🔄 DB로부터 최신 상태 불러오기...");
     const { data: dbData, error } = await supabase.from("meters").select("*");
@@ -100,49 +100,79 @@ function App() {
     document.head.appendChild(script);
   }, [loggedIn]);
 
-  // ✅ 다른 사용자 마지막 작업 위치 표시 (관리자 전용)
+  // ✅ 모든 사용자 위치 표시 (자기 위치 + 다른 유저)
   useEffect(() => {
-    if (!map || !canViewOthers) return;
+    if (!map) return;
 
+    // 🔹 Realtime: 모든 user_locations 구독
     const channel = supabase
       .channel("user_location_updates")
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "user_locations" },
         (payload) => {
-          const { user_id, lat, lng, action, updated_at } = payload.new;
-          if (user_id === user) return; // 자기 자신 제외
+          const { user_id, lat, lng, action } = payload.new;
           const position = new window.kakao.maps.LatLng(lat, lng);
 
           const color =
             action === "완료" ? "#2ecc71" : action === "불가" ? "#e74c3c" : "#3498db";
 
-          const markerContent = document.createElement("div");
-          markerContent.innerHTML = `
-            <div style="
-              background:${color};
-              color:white;
-              border:2px solid white;
-              border-radius:15px;
-              padding:3px 8px;
-              font-size:12px;
-              font-weight:bold;
-              box-shadow:0 0 5px rgba(0,0,0,0.3);
-              white-space:nowrap;
-            ">👤 ${user_id} (${action})</div>
-          `;
-
-          if (!otherUsers.current[user_id]) {
-            const overlay = new window.kakao.maps.CustomOverlay({
-              position,
-              content: markerContent,
-              yAnchor: 1.3,
-              zIndex: 9999,
-            });
-            overlay.setMap(map);
-            otherUsers.current[user_id] = overlay;
-          } else {
-            otherUsers.current[user_id].setPosition(position);
+          // 👤 본인 표시: 항상 보여야 함
+          if (user_id === user) {
+            const markerContent = document.createElement("div");
+            markerContent.innerHTML = `
+              <div style="
+                background:#3182f6;
+                color:white;
+                border:2px solid white;
+                border-radius:15px;
+                padding:3px 8px;
+                font-size:13px;
+                font-weight:bold;
+                box-shadow:0 0 5px rgba(0,0,0,0.3);
+                white-space:nowrap;
+              ">📍 ${user_id}</div>
+            `;
+            if (!userMarker.current) {
+              userMarker.current = new window.kakao.maps.CustomOverlay({
+                position,
+                content: markerContent,
+                yAnchor: 1.3,
+                zIndex: 9999,
+              });
+              userMarker.current.setMap(map);
+            } else {
+              userMarker.current.setPosition(position);
+            }
+          }
+          // 🔹 다른 유저 표시 (관리자만)
+          else if (canViewOthers) {
+            const markerContent = document.createElement("div");
+            markerContent.innerHTML = `
+              <div style="
+                background:${color};
+                color:white;
+                border:2px solid white;
+                border-radius:15px;
+                padding:3px 8px;
+                font-size:12px;
+                font-weight:bold;
+                box-shadow:0 0 5px rgba(0,0,0,0.3);
+                white-space:nowrap;
+              ">👤 ${user_id} (${action})</div>
+            `;
+            if (!otherUsers.current[user_id]) {
+              const overlay = new window.kakao.maps.CustomOverlay({
+                position,
+                content: markerContent,
+                yAnchor: 1.3,
+                zIndex: 9999,
+              });
+              overlay.setMap(map);
+              otherUsers.current[user_id] = overlay;
+            } else {
+              otherUsers.current[user_id].setPosition(position);
+            }
           }
         }
       )
@@ -151,9 +181,9 @@ function App() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [map, canViewOthers]);
+  }, [map, user, canViewOthers]);
 
-  // ✅ Supabase 상태 업데이트 + GPS 위치 저장
+  // ✅ Supabase 상태 업데이트 + GPS 저장
   const updateStatus = async (meterIds, newStatus) => {
     const updated = data.map((d) =>
       meterIds.includes(d.meter_id) ? { ...d, status: newStatus } : d
@@ -163,7 +193,7 @@ function App() {
     await supabase.from("meters").upsert(payload, { onConflict: ["meter_id", "address"] });
     console.log("✅ 상태 저장 완료");
 
-    // 📍 버튼 클릭 시 현재 GPS 저장
+    // 📍 현재 위치 1회 저장
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(async (pos) => {
         const lat = pos.coords.latitude;
