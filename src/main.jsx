@@ -17,9 +17,7 @@ function App() {
   const [counts, setCounts] = useState({ 완료: 0, 불가: 0, 미방문: 0 });
   const [dataFile, setDataFile] = useState(null);
   const [canViewOthers, setCanViewOthers] = useState(false);
-  const [mapType, setMapType] = useState(
-    localStorage.getItem("mapType") || "ROADMAP"
-  ); // 🆕 기본 지도 타입 저장
+  const [mapType, setMapType] = useState(localStorage.getItem("mapType") || "ROADMAP");
 
   const activeOverlay = useRef(null);
   const markers = useRef([]);
@@ -55,6 +53,7 @@ function App() {
       meter_id: r["계기번호"],
       address: r["주소"],
       status: r["진행"] || "미방문",
+      owner_id: user, // 👈 일반 유저 구분용
     }));
 
     const { data: dbData } = await supabase.from("meters").select("*");
@@ -107,26 +106,22 @@ function App() {
     document.head.appendChild(script);
   }, [loggedIn]);
 
-  // 🆕 지도 타입 변경 핸들러
+  // ✅ 지도 타입 전환
   const toggleMapType = () => {
     if (!map) return;
     const nextType = mapType === "ROADMAP" ? "SKYVIEW" : "ROADMAP";
     setMapType(nextType);
     localStorage.setItem("mapType", nextType);
-
     const mapTypeId =
       nextType === "SKYVIEW"
         ? window.kakao.maps.MapTypeId.HYBRID
         : window.kakao.maps.MapTypeId.ROADMAP;
     map.setMapTypeId(mapTypeId);
-
-    console.log(`🗺️ 지도 타입 전환: ${nextType}`);
   };
 
   // ✅ 모든 유저의 위치 표시 (Realtime)
   useEffect(() => {
     if (!map) return;
-
     const channel = supabase
       .channel("user_location_updates")
       .on(
@@ -197,7 +192,7 @@ function App() {
     return () => supabase.removeChannel(channel);
   }, [map, user, canViewOthers]);
 
-  // ✅ Supabase 상태 업데이트 + 위치 저장 + 데이터 즉시 갱신
+  // ✅ Supabase 상태 업데이트 + 관리자 권한 구분
   const updateStatus = async (meterIds, newStatus) => {
     try {
       console.log(`🔘 상태 변경 요청: ${newStatus} (${meterIds.length}개)`);
@@ -206,14 +201,19 @@ function App() {
         meterIds.includes(d.meter_id) ? { ...d, status: newStatus } : d
       );
       setData(updated);
-
       const payload = updated.filter((d) => meterIds.includes(d.meter_id));
-      const { error } = await supabase
-        .from("meters")
-        .upsert(payload, { onConflict: ["meter_id", "address"] });
-      if (error) throw error;
-      console.log("✅ Supabase 상태 저장 완료");
 
+      if (canViewOthers) {
+        console.log("🧭 관리자 계정: 모든 데이터 수정 가능");
+        await supabase.rpc("upsert_meters_admin", { rows: payload });
+      } else {
+        console.log("👤 일반 사용자: 본인 데이터만 수정");
+        await supabase
+          .from("meters")
+          .upsert(payload, { onConflict: ["meter_id", "address"] });
+      }
+
+      // 📍 현재 GPS 위치 저장
       if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(async (pos) => {
           const lat = pos.coords.latitude;
@@ -225,7 +225,6 @@ function App() {
             action: newStatus,
             updated_at: new Date().toISOString(),
           });
-          console.log(`📍 ${user} 위치 저장 완료 (${newStatus})`);
         });
       }
 
@@ -259,7 +258,6 @@ function App() {
   const renderMarkers = async () => {
     markers.current.forEach((m) => m.setMap(null));
     markers.current = [];
-
     const geocoder = new window.kakao.maps.services.Geocoder();
     const grouped = {};
     const statusCount = { 완료: 0, 불가: 0, 미방문: 0 };
@@ -317,21 +315,16 @@ function App() {
           border:1px solid #ccc;
           border-radius:8px;
         `;
-        popupEl.addEventListener("mousedown", (e) => e.stopPropagation());
-        popupEl.addEventListener("click", (e) => e.stopPropagation());
-
         const title = document.createElement("b");
         title.textContent = list[0].address;
         popupEl.appendChild(title);
         popupEl.appendChild(document.createElement("br"));
         popupEl.appendChild(document.createElement("br"));
-
         list.forEach((g) => {
           const div = document.createElement("div");
           div.textContent = `계기번호: ${g.meter_id}`;
           popupEl.appendChild(div);
         });
-
         popupEl.appendChild(document.createElement("hr"));
 
         ["완료", "불가", "미방문"].forEach((text) => {
@@ -354,10 +347,6 @@ function App() {
         popupOverlay.setMap(map);
         activeOverlay.current = popupOverlay;
       });
-    });
-
-    window.kakao.maps.event.addListener(map, "click", () => {
-      if (activeOverlay.current) activeOverlay.current.setMap(null);
     });
   };
 
@@ -382,7 +371,7 @@ function App() {
 
   return (
     <div style={{ width: "100%", height: "100vh", position: "relative" }}>
-      {/* 상태 카운트 바 */}
+      {/* 상태 바 */}
       <div
         style={{
           position: "absolute",
@@ -403,12 +392,12 @@ function App() {
         )}
       </div>
 
-      {/* 🆕 지도 타입 전환 버튼 */}
+      {/* 지도 타입 버튼 (왼쪽 하단) */}
       <div
         style={{
           position: "absolute",
-          top: 10,
-          right: 10,
+          bottom: 15,
+          left: 15,
           background: "white",
           padding: "6px 10px",
           borderRadius: "8px",
@@ -422,7 +411,6 @@ function App() {
         {mapType === "ROADMAP" ? "🛰️ 스카이뷰" : "🗺️ 일반지도"}
       </div>
 
-      {/* 지도 본체 */}
       <div id="map" style={{ width: "100%", height: "100vh" }}></div>
     </div>
   );
