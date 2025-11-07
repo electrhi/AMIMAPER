@@ -25,38 +25,6 @@ function App() {
   const userMarker = useRef(null);
   const otherUsers = useRef({});
 
-  // ✅ Supabase 테이블 구조 확인 및 자동 보정
-  const ensureOwnerIdColumn = async () => {
-    try {
-      console.log("🔍 meters 테이블 구조 확인 중...");
-      const { data: columns, error } = await supabase.rpc("pg_table_def", {
-        tablename: "meters",
-      });
-
-      // Supabase에서 pg_table_def 함수가 없을 수 있으므로, try-catch fallback
-      if (error || !columns) {
-        console.log("⚠️ pg_table_def 사용 불가 — 대체 방식 적용");
-        const { error: alterError } = await supabase.rpc("execute_sql", {
-          sql: "ALTER TABLE public.meters ADD COLUMN IF NOT EXISTS owner_id text;",
-        });
-        if (alterError) console.warn("⚠️ 자동 컬럼 추가 실패:", alterError.message);
-        else console.log("✅ owner_id 컬럼 자동 생성 완료");
-      } else {
-        const hasOwnerId = columns.some((c) => c.column_name === "owner_id");
-        if (!hasOwnerId) {
-          console.log("⚙️ owner_id 컬럼 없음 → 자동 생성 시도...");
-          const { error: alterError } = await supabase.rpc("execute_sql", {
-            sql: "ALTER TABLE public.meters ADD COLUMN IF NOT EXISTS owner_id text;",
-          });
-          if (alterError) console.warn("⚠️ 자동 컬럼 추가 실패:", alterError.message);
-          else console.log("✅ owner_id 컬럼 자동 생성 완료");
-        } else console.log("✅ owner_id 컬럼 이미 존재");
-      }
-    } catch (e) {
-      console.warn("⚠️ 테이블 구조 확인 중 오류 (무시 가능):", e.message);
-    }
-  };
-
   // ✅ 로그인
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -67,7 +35,6 @@ function App() {
       console.log("✅ 로그인 성공:", users[0]);
       setDataFile(users[0].data_file);
       setCanViewOthers(!!users[0].can_view_others);
-      await ensureOwnerIdColumn(); // 👈 자동 컬럼 보정
       await loadExcelAndDB(users[0].data_file);
       setLoggedIn(true);
     } else alert("로그인 실패");
@@ -86,7 +53,7 @@ function App() {
       meter_id: r["계기번호"],
       address: r["주소"],
       status: r["진행"] || "미방문",
-      owner_id: user, // ✅ 자동으로 추가
+      owner_id: user,
     }));
 
     const { data: dbData } = await supabase.from("meters").select("*");
@@ -97,16 +64,13 @@ function App() {
       return match ? { ...x, status: match.status } : x;
     });
 
-    console.log("✅ 데이터 병합 완료:", merged.length);
     setData(merged);
   };
 
   // ✅ DB 최신 상태 불러오기
   const loadDataFromDB = async () => {
-    console.log("🔄 DB로부터 최신 상태 불러오기...");
     const { data: dbData, error } = await supabase.from("meters").select("*");
     if (error) return console.error("❌ DB 불러오기 실패:", error.message);
-
     setData((prev) =>
       prev.map((d) => {
         const match = dbData.find(
@@ -117,7 +81,7 @@ function App() {
     );
   };
 
-  // ✅ Kakao 지도 로드
+  // ✅ Kakao 지도 로드 + 내 위치로 이동
   useEffect(() => {
     if (!loggedIn) return;
     const script = document.createElement("script");
@@ -125,13 +89,28 @@ function App() {
     script.onload = () => {
       window.kakao.maps.load(() => {
         const mapInstance = new window.kakao.maps.Map(document.getElementById("map"), {
-          center: new window.kakao.maps.LatLng(37.5665, 126.9780),
           level: 6,
           mapTypeId:
             mapType === "SKYVIEW"
               ? window.kakao.maps.MapTypeId.HYBRID
               : window.kakao.maps.MapTypeId.ROADMAP,
         });
+
+        // ✅ 로그인 직후 내 위치 중심으로 이동
+        if (navigator.geolocation) {
+          navigator.geolocation.getCurrentPosition(
+            (pos) => {
+              const lat = pos.coords.latitude;
+              const lng = pos.coords.longitude;
+              const locPosition = new window.kakao.maps.LatLng(lat, lng);
+              mapInstance.setCenter(locPosition);
+              console.log("📍 내 위치로 지도 이동 완료");
+              showMyLocationMarker(lat, lng, mapInstance);
+            },
+            () => console.warn("⚠️ 위치 정보를 가져올 수 없습니다.")
+          );
+        }
+
         setMap(mapInstance);
         console.log("✅ Kakao 지도 초기화 완료");
       });
@@ -139,57 +118,86 @@ function App() {
     document.head.appendChild(script);
   }, [loggedIn]);
 
+  // ✅ 내 위치 마커 표시
+  const showMyLocationMarker = (lat, lng, mapInstance = map) => {
+    if (!mapInstance) return;
+
+    const markerContent = document.createElement("div");
+    markerContent.innerHTML = `
+      <div style="
+        background:#3182f6;
+        color:white;
+        border:2px solid white;
+        border-radius:15px;
+        padding:3px 8px;
+        font-size:13px;
+        font-weight:bold;
+        box-shadow:0 0 5px rgba(0,0,0,0.3);
+        white-space:nowrap;
+      ">
+        📍 ${user}
+      </div>
+    `;
+
+    const position = new window.kakao.maps.LatLng(lat, lng);
+
+    if (!userMarker.current) {
+      userMarker.current = new window.kakao.maps.CustomOverlay({
+        position,
+        content: markerContent,
+        yAnchor: 1.3,
+        zIndex: 9999,
+      });
+      userMarker.current.setMap(mapInstance);
+    } else {
+      userMarker.current.setPosition(position);
+      userMarker.current.setContent(markerContent);
+    }
+  };
+
   // ✅ 지도 타입 전환
   const toggleMapType = () => {
     if (!map) return;
     const nextType = mapType === "ROADMAP" ? "SKYVIEW" : "ROADMAP";
     setMapType(nextType);
     localStorage.setItem("mapType", nextType);
-    const mapTypeId =
+    map.setMapTypeId(
       nextType === "SKYVIEW"
         ? window.kakao.maps.MapTypeId.HYBRID
-        : window.kakao.maps.MapTypeId.ROADMAP;
-    map.setMapTypeId(mapTypeId);
+        : window.kakao.maps.MapTypeId.ROADMAP
+    );
   };
 
-  // ✅ Supabase 상태 업데이트
+  // ✅ 상태 변경
   const updateStatus = async (meterIds, newStatus) => {
-    try {
-      console.log(`🔘 상태 변경 요청: ${newStatus} (${meterIds.length}개)`);
+    const updated = data.map((d) =>
+      meterIds.includes(d.meter_id) ? { ...d, status: newStatus } : d
+    );
+    setData(updated);
+    const payload = updated.filter((d) => meterIds.includes(d.meter_id));
 
-      const updated = data.map((d) =>
-        meterIds.includes(d.meter_id) ? { ...d, status: newStatus } : d
-      );
-      setData(updated);
-      const payload = updated.filter((d) => meterIds.includes(d.meter_id));
-
-      if (canViewOthers) {
-        console.log("🧭 관리자 계정: 모든 데이터 수정 가능");
-        await supabase.rpc("upsert_meters_admin", { rows: payload });
-      } else {
-        console.log("👤 일반 사용자: 본인 데이터만 수정");
-        await supabase.from("meters").upsert(payload, { onConflict: ["meter_id", "address"] });
-      }
-
-      // 위치 기록
-      if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(async (pos) => {
-          const lat = pos.coords.latitude;
-          const lng = pos.coords.longitude;
-          await supabase.from("user_locations").upsert({
-            user_id: user,
-            lat,
-            lng,
-            action: newStatus,
-            updated_at: new Date().toISOString(),
-          });
-        });
-      }
-
-      await loadDataFromDB();
-    } catch (err) {
-      console.error("❌ updateStatus() 오류:", err.message);
+    if (canViewOthers) {
+      await supabase.rpc("upsert_meters_admin", { rows: payload });
+    } else {
+      await supabase.from("meters").upsert(payload, { onConflict: ["meter_id", "address"] });
     }
+
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(async (pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        showMyLocationMarker(lat, lng);
+        await supabase.from("user_locations").upsert({
+          user_id: user,
+          lat,
+          lng,
+          action: newStatus,
+          updated_at: new Date().toISOString(),
+        });
+      });
+    }
+
+    await loadDataFromDB();
   };
 
   // ✅ Geocoder (캐싱)
@@ -307,8 +315,17 @@ function App() {
         activeOverlay.current = popupOverlay;
       });
     });
+
+    // ✅ 지도 클릭 시 팝업 닫기
+    window.kakao.maps.event.addListener(map, "click", () => {
+      if (activeOverlay.current) {
+        activeOverlay.current.setMap(null);
+        activeOverlay.current = null;
+      }
+    });
   };
 
+  // ✅ 로그인 UI
   if (!loggedIn)
     return (
       <div style={{ textAlign: "center", marginTop: "100px" }}>
@@ -328,9 +345,10 @@ function App() {
       </div>
     );
 
+  // ✅ 지도 UI
   return (
     <div style={{ width: "100%", height: "100vh", position: "relative" }}>
-      {/* 상단 상태바 */}
+      {/* 상태 바 */}
       <div
         style={{
           position: "absolute",
@@ -347,11 +365,11 @@ function App() {
         ✅ 완료: {counts["완료"] || 0} | ❌ 불가: {counts["불가"] || 0} | 🟦 미방문:{" "}
         {counts["미방문"] || 0}
         {canViewOthers && (
-          <span style={{ marginLeft: "10px", color: "#ff7f00" }}>🧭 관리자모드</span>
+          <span style={{ marginLeft: "10px", color: "#ff7f00" }}>🧭 관리자</span>
         )}
       </div>
 
-      {/* 지도 타입 전환 버튼 */}
+      {/* 지도 타입 전환 버튼 (항상 표시) */}
       <div
         style={{
           position: "absolute",
