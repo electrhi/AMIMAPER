@@ -17,6 +17,9 @@ function App() {
   const [counts, setCounts] = useState({ 완료: 0, 불가: 0, 미방문: 0 });
   const [dataFile, setDataFile] = useState(null);
   const [canViewOthers, setCanViewOthers] = useState(false);
+  const [mapType, setMapType] = useState(
+    localStorage.getItem("mapType") || "ROADMAP"
+  ); // 🆕 기본 지도 타입 저장
 
   const activeOverlay = useRef(null);
   const markers = useRef([]);
@@ -92,6 +95,10 @@ function App() {
         const mapInstance = new window.kakao.maps.Map(document.getElementById("map"), {
           center: new window.kakao.maps.LatLng(37.5665, 126.9780),
           level: 6,
+          mapTypeId:
+            mapType === "SKYVIEW"
+              ? window.kakao.maps.MapTypeId.HYBRID
+              : window.kakao.maps.MapTypeId.ROADMAP,
         });
         console.log("✅ Kakao 지도 초기화 완료");
         setMap(mapInstance);
@@ -99,6 +106,22 @@ function App() {
     };
     document.head.appendChild(script);
   }, [loggedIn]);
+
+  // 🆕 지도 타입 변경 핸들러
+  const toggleMapType = () => {
+    if (!map) return;
+    const nextType = mapType === "ROADMAP" ? "SKYVIEW" : "ROADMAP";
+    setMapType(nextType);
+    localStorage.setItem("mapType", nextType);
+
+    const mapTypeId =
+      nextType === "SKYVIEW"
+        ? window.kakao.maps.MapTypeId.HYBRID
+        : window.kakao.maps.MapTypeId.ROADMAP;
+    map.setMapTypeId(mapTypeId);
+
+    console.log(`🗺️ 지도 타입 전환: ${nextType}`);
+  };
 
   // ✅ 모든 유저의 위치 표시 (Realtime)
   useEffect(() => {
@@ -179,13 +202,11 @@ function App() {
     try {
       console.log(`🔘 상태 변경 요청: ${newStatus} (${meterIds.length}개)`);
 
-      // 1️⃣ 상태 로컬 반영
       const updated = data.map((d) =>
         meterIds.includes(d.meter_id) ? { ...d, status: newStatus } : d
       );
       setData(updated);
 
-      // 2️⃣ Supabase 저장
       const payload = updated.filter((d) => meterIds.includes(d.meter_id));
       const { error } = await supabase
         .from("meters")
@@ -193,7 +214,6 @@ function App() {
       if (error) throw error;
       console.log("✅ Supabase 상태 저장 완료");
 
-      // 3️⃣ 현재 GPS 위치 저장
       if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(async (pos) => {
           const lat = pos.coords.latitude;
@@ -209,7 +229,6 @@ function App() {
         });
       }
 
-      // 4️⃣ UI 갱신 (즉시 반영)
       await loadDataFromDB();
     } catch (err) {
       console.error("❌ updateStatus() 오류:", err.message);
@@ -363,6 +382,7 @@ function App() {
 
   return (
     <div style={{ width: "100%", height: "100vh", position: "relative" }}>
+      {/* 상태 카운트 바 */}
       <div
         style={{
           position: "absolute",
@@ -382,6 +402,27 @@ function App() {
           <span style={{ marginLeft: "10px", color: "#ff7f00" }}>🧭 관리자모드</span>
         )}
       </div>
+
+      {/* 🆕 지도 타입 전환 버튼 */}
+      <div
+        style={{
+          position: "absolute",
+          top: 10,
+          right: 10,
+          background: "white",
+          padding: "6px 10px",
+          borderRadius: "8px",
+          boxShadow: "0 2px 5px rgba(0,0,0,0.2)",
+          cursor: "pointer",
+          zIndex: 99999,
+          fontWeight: "bold",
+        }}
+        onClick={toggleMapType}
+      >
+        {mapType === "ROADMAP" ? "🛰️ 스카이뷰" : "🗺️ 일반지도"}
+      </div>
+
+      {/* 지도 본체 */}
       <div id="map" style={{ width: "100%", height: "100vh" }}></div>
     </div>
   );
