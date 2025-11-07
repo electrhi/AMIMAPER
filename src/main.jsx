@@ -23,7 +23,6 @@ function App() {
   const markers = useRef([]);
   const geoCache = JSON.parse(localStorage.getItem("geoCache") || "{}");
   const userMarker = useRef(null);
-  const otherUsers = useRef({});
 
   // ✅ 로그인
   const handleLogin = async (e) => {
@@ -53,7 +52,7 @@ function App() {
       meter_id: r["계기번호"],
       address: r["주소"],
       status: r["진행"] || "미방문",
-      owner_id: user,
+      owner_id: user, // 자동 추가
     }));
 
     const { data: dbData } = await supabase.from("meters").select("*");
@@ -61,7 +60,7 @@ function App() {
       const match = dbData?.find(
         (d) => d.meter_id === x.meter_id && d.address === x.address
       );
-      return match ? { ...x, status: match.status } : x;
+      return match ? { ...x, status: match.status, owner_id: d?.owner_id || user } : x;
     });
 
     setData(merged);
@@ -81,41 +80,62 @@ function App() {
     );
   };
 
-  // ✅ Kakao 지도 로드 + 내 위치로 이동
+  // ✅ Kakao 지도 로드 + 내 위치 중심 이동 (안정화 버전)
   useEffect(() => {
     if (!loggedIn) return;
-    const script = document.createElement("script");
-    script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${KAKAO_KEY}&autoload=false&libraries=services`;
-    script.onload = () => {
-      window.kakao.maps.load(() => {
-        const mapInstance = new window.kakao.maps.Map(document.getElementById("map"), {
-          level: 6,
-          mapTypeId:
-            mapType === "SKYVIEW"
-              ? window.kakao.maps.MapTypeId.HYBRID
-              : window.kakao.maps.MapTypeId.ROADMAP,
-        });
 
-        // ✅ 로그인 직후 내 위치 중심으로 이동
-        if (navigator.geolocation) {
-          navigator.geolocation.getCurrentPosition(
-            (pos) => {
-              const lat = pos.coords.latitude;
-              const lng = pos.coords.longitude;
-              const locPosition = new window.kakao.maps.LatLng(lat, lng);
-              mapInstance.setCenter(locPosition);
-              console.log("📍 내 위치로 지도 이동 완료");
-              showMyLocationMarker(lat, lng, mapInstance);
-            },
-            () => console.warn("⚠️ 위치 정보를 가져올 수 없습니다.")
-          );
-        }
+    const initializeMap = () => {
+      if (!window.kakao || !window.kakao.maps) {
+        console.warn("⚠️ Kakao 객체 아직 준비 안됨. 재시도 중...");
+        setTimeout(initializeMap, 300);
+        return;
+      }
 
-        setMap(mapInstance);
-        console.log("✅ Kakao 지도 초기화 완료");
+      const mapContainer = document.getElementById("map");
+      if (!mapContainer) {
+        console.warn("⚠️ 지도 DOM이 아직 존재하지 않음. 재시도 중...");
+        setTimeout(initializeMap, 300);
+        return;
+      }
+
+      const mapInstance = new window.kakao.maps.Map(mapContainer, {
+        level: 6,
+        mapTypeId:
+          mapType === "SKYVIEW"
+            ? window.kakao.maps.MapTypeId.HYBRID
+            : window.kakao.maps.MapTypeId.ROADMAP,
       });
+
+      // ✅ 로그인 후 내 위치로 이동
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            const lat = pos.coords.latitude;
+            const lng = pos.coords.longitude;
+            const locPosition = new window.kakao.maps.LatLng(lat, lng);
+            mapInstance.setCenter(locPosition);
+            console.log("📍 내 위치로 지도 이동 완료");
+            showMyLocationMarker(lat, lng, mapInstance);
+          },
+          (err) => console.warn("⚠️ 위치 정보를 가져올 수 없습니다:", err.message)
+        );
+      }
+
+      setMap(mapInstance);
+      console.log("✅ Kakao 지도 초기화 완료");
     };
-    document.head.appendChild(script);
+
+    // ✅ 이미 로드된 경우
+    if (window.kakao && window.kakao.maps) {
+      initializeMap();
+    } else {
+      const script = document.createElement("script");
+      script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${KAKAO_KEY}&autoload=false&libraries=services`;
+      script.onload = () => {
+        window.kakao.maps.load(() => initializeMap());
+      };
+      document.head.appendChild(script);
+    }
   }, [loggedIn]);
 
   // ✅ 내 위치 마커 표시
@@ -140,7 +160,6 @@ function App() {
     `;
 
     const position = new window.kakao.maps.LatLng(lat, lng);
-
     if (!userMarker.current) {
       userMarker.current = new window.kakao.maps.CustomOverlay({
         position,
@@ -155,7 +174,7 @@ function App() {
     }
   };
 
-  // ✅ 지도 타입 전환
+  // ✅ 지도 타입 전환 (스카이뷰 버튼)
   const toggleMapType = () => {
     if (!map) return;
     const nextType = mapType === "ROADMAP" ? "SKYVIEW" : "ROADMAP";
@@ -171,16 +190,13 @@ function App() {
   // ✅ 상태 변경
   const updateStatus = async (meterIds, newStatus) => {
     const updated = data.map((d) =>
-      meterIds.includes(d.meter_id) ? { ...d, status: newStatus } : d
+      meterIds.includes(d.meter_id) ? { ...d, status: newStatus, owner_id: d.owner_id || user } : d
     );
     setData(updated);
     const payload = updated.filter((d) => meterIds.includes(d.meter_id));
 
-    if (canViewOthers) {
-      await supabase.rpc("upsert_meters_admin", { rows: payload });
-    } else {
-      await supabase.from("meters").upsert(payload, { onConflict: ["meter_id", "address"] });
-    }
+    await supabase.from("meters").upsert(payload, { onConflict: ["meter_id", "address"] });
+    console.log("✅ 상태 업데이트 완료");
 
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(async (pos) => {
@@ -200,7 +216,7 @@ function App() {
     await loadDataFromDB();
   };
 
-  // ✅ Geocoder (캐싱)
+  // ✅ Geocoder 캐싱
   const geocodeAddress = (geocoder, address) =>
     new Promise((resolve) => {
       if (geoCache[address]) return resolve(geoCache[address]);
@@ -316,7 +332,6 @@ function App() {
       });
     });
 
-    // ✅ 지도 클릭 시 팝업 닫기
     window.kakao.maps.event.addListener(map, "click", () => {
       if (activeOverlay.current) {
         activeOverlay.current.setMap(null);
@@ -369,7 +384,7 @@ function App() {
         )}
       </div>
 
-      {/* 지도 타입 전환 버튼 (항상 표시) */}
+      {/* 지도 타입 전환 버튼 (왼쪽 하단) */}
       <div
         style={{
           position: "absolute",
