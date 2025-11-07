@@ -16,12 +16,13 @@ function App() {
   const [map, setMap] = useState(null);
   const [counts, setCounts] = useState({ 완료: 0, 불가: 0, 미방문: 0 });
   const [dataFile, setDataFile] = useState(null);
-  const [userPosition, setUserPosition] = useState(null);
+  const [canViewOthers, setCanViewOthers] = useState(false);
 
   const activeOverlay = useRef(null);
   const markers = useRef([]);
   const geoCache = JSON.parse(localStorage.getItem("geoCache") || "{}");
   const userMarker = useRef(null);
+  const otherUsers = useRef({});
 
   // ✅ 로그인
   const handleLogin = async (e) => {
@@ -32,6 +33,7 @@ function App() {
     if (users?.length && users[0].password === password) {
       console.log("✅ 로그인 성공:", users[0]);
       setDataFile(users[0].data_file);
+      setCanViewOthers(!!users[0].can_view_others);
       await loadExcelAndDB(users[0].data_file);
       setLoggedIn(true);
     } else alert("로그인 실패");
@@ -98,60 +100,85 @@ function App() {
     document.head.appendChild(script);
   }, [loggedIn]);
 
-  // ✅ GPS 위치 추적 + 아이디 마커 표시
+  // ✅ 다른 사용자 마지막 작업 위치 표시 (관리자 전용)
   useEffect(() => {
-    if (!map || !loggedIn) return;
+    if (!map || !canViewOthers) return;
 
-    if (!navigator.geolocation) {
-      console.warn("⚠️ 이 브라우저는 위치 정보를 지원하지 않습니다.");
-      return;
-    }
+    const channel = supabase
+      .channel("user_location_updates")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "user_locations" },
+        (payload) => {
+          const { user_id, lat, lng, action, updated_at } = payload.new;
+          if (user_id === user) return; // 자기 자신 제외
+          const position = new window.kakao.maps.LatLng(lat, lng);
 
-    const updateLocation = (pos) => {
-      const lat = pos.coords.latitude;
-      const lng = pos.coords.longitude;
-      setUserPosition({ lat, lng });
+          const color =
+            action === "완료" ? "#2ecc71" : action === "불가" ? "#e74c3c" : "#3498db";
 
-      // 커스텀 마커 내용
-      const markerContent = document.createElement("div");
-      markerContent.innerHTML = `
-        <div style="
-          background:#3182f6;
-          color:white;
-          border:2px solid white;
-          border-radius:15px;
-          padding:3px 8px;
-          font-size:13px;
-          font-weight:bold;
-          box-shadow:0 0 5px rgba(0,0,0,0.3);
-          white-space:nowrap;
-        ">
-          📍 ${user}
-        </div>
-      `;
+          const markerContent = document.createElement("div");
+          markerContent.innerHTML = `
+            <div style="
+              background:${color};
+              color:white;
+              border:2px solid white;
+              border-radius:15px;
+              padding:3px 8px;
+              font-size:12px;
+              font-weight:bold;
+              box-shadow:0 0 5px rgba(0,0,0,0.3);
+              white-space:nowrap;
+            ">👤 ${user_id} (${action})</div>
+          `;
 
-      const position = new window.kakao.maps.LatLng(lat, lng);
+          if (!otherUsers.current[user_id]) {
+            const overlay = new window.kakao.maps.CustomOverlay({
+              position,
+              content: markerContent,
+              yAnchor: 1.3,
+              zIndex: 9999,
+            });
+            overlay.setMap(map);
+            otherUsers.current[user_id] = overlay;
+          } else {
+            otherUsers.current[user_id].setPosition(position);
+          }
+        }
+      )
+      .subscribe();
 
-      if (!userMarker.current) {
-        // 처음 한 번만 생성
-        userMarker.current = new window.kakao.maps.CustomOverlay({
-          position,
-          content: markerContent,
-          yAnchor: 1.3,
-          zIndex: 99999,
-        });
-        userMarker.current.setMap(map);
-        console.log(`🧭 ${user} 위치 마커 생성 완료`);
-      } else {
-        // 위치 갱신
-        userMarker.current.setPosition(position);
-      }
+    return () => {
+      supabase.removeChannel(channel);
     };
+  }, [map, canViewOthers]);
 
-    navigator.geolocation.watchPosition(updateLocation, (err) => {
-      console.error("❌ 위치 추적 오류:", err.message);
-    });
-  }, [map, loggedIn, user]);
+  // ✅ Supabase 상태 업데이트 + GPS 위치 저장
+  const updateStatus = async (meterIds, newStatus) => {
+    const updated = data.map((d) =>
+      meterIds.includes(d.meter_id) ? { ...d, status: newStatus } : d
+    );
+    setData(updated);
+    const payload = updated.filter((d) => meterIds.includes(d.meter_id));
+    await supabase.from("meters").upsert(payload, { onConflict: ["meter_id", "address"] });
+    console.log("✅ 상태 저장 완료");
+
+    // 📍 버튼 클릭 시 현재 GPS 저장
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(async (pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        await supabase.from("user_locations").upsert({
+          user_id: user,
+          lat,
+          lng,
+          action: newStatus,
+          updated_at: new Date().toISOString(),
+        });
+        console.log(`📍 ${user} 위치 저장 완료 (${newStatus})`);
+      });
+    }
+  };
 
   // ✅ Geocoder (캐싱)
   const geocodeAddress = (geocoder, address) =>
@@ -224,7 +251,6 @@ function App() {
 
       markerEl.addEventListener("click", async (e) => {
         e.stopPropagation();
-        console.log("🧭 마커 클릭 → DB 새로고침 실행");
         await loadDataFromDB();
 
         if (activeOverlay.current) activeOverlay.current.setMap(null);
@@ -259,7 +285,6 @@ function App() {
           btn.style.marginRight = "5px";
           btn.addEventListener("click", async (e) => {
             e.stopPropagation();
-            console.log(`🔘 ${text} 버튼 클릭`);
             await updateStatus(list.map((g) => g.meter_id), text);
           });
           popupEl.appendChild(btn);
@@ -276,21 +301,9 @@ function App() {
       });
     });
 
-    // ✅ 지도 클릭 → 팝업 닫기만
     window.kakao.maps.event.addListener(map, "click", () => {
       if (activeOverlay.current) activeOverlay.current.setMap(null);
     });
-  };
-
-  // ✅ Supabase 상태 업데이트
-  const updateStatus = async (meterIds, newStatus) => {
-    const updated = data.map((d) =>
-      meterIds.includes(d.meter_id) ? { ...d, status: newStatus } : d
-    );
-    setData(updated);
-    const payload = updated.filter((d) => meterIds.includes(d.meter_id));
-    await supabase.from("meters").upsert(payload, { onConflict: ["meter_id", "address"] });
-    console.log("✅ Supabase 저장 완료");
   };
 
   if (!loggedIn)
@@ -329,6 +342,9 @@ function App() {
       >
         ✅ 완료: {counts["완료"] || 0} | ❌ 불가: {counts["불가"] || 0} | 🟦 미방문:{" "}
         {counts["미방문"] || 0}
+        {canViewOthers && (
+          <span style={{ marginLeft: "10px", color: "#ff7f00" }}>🧭 관리자모드</span>
+        )}
       </div>
       <div id="map" style={{ width: "100%", height: "100vh" }}></div>
     </div>
