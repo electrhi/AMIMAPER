@@ -100,11 +100,10 @@ function App() {
     document.head.appendChild(script);
   }, [loggedIn]);
 
-  // ✅ 모든 사용자 위치 표시 (자기 위치 + 다른 유저)
+  // ✅ 모든 유저의 위치 표시 (Realtime)
   useEffect(() => {
     if (!map) return;
 
-    // 🔹 Realtime: 모든 user_locations 구독
     const channel = supabase
       .channel("user_location_updates")
       .on(
@@ -115,24 +114,34 @@ function App() {
           const position = new window.kakao.maps.LatLng(lat, lng);
 
           const color =
-            action === "완료" ? "#2ecc71" : action === "불가" ? "#e74c3c" : "#3498db";
+            user_id === user
+              ? "#3498db" // 내 위치 (파랑)
+              : action === "완료"
+              ? "#2ecc71"
+              : action === "불가"
+              ? "#e74c3c"
+              : "#95a5a6"; // 회색
 
-          // 👤 본인 표시: 항상 보여야 함
+          // 📍 마커 스타일 (말풍선 느낌)
+          const markerContent = document.createElement("div");
+          markerContent.innerHTML = `
+            <div style="
+              background:${color};
+              color:white;
+              border-radius:18px;
+              padding:5px 10px;
+              font-size:13px;
+              font-weight:bold;
+              box-shadow:0 2px 5px rgba(0,0,0,0.3);
+              white-space:nowrap;
+              border:2px solid white;
+            ">
+              📍 ${user_id}
+            </div>
+          `;
+
+          // ✅ 본인 위치: 항상 표시
           if (user_id === user) {
-            const markerContent = document.createElement("div");
-            markerContent.innerHTML = `
-              <div style="
-                background:#3182f6;
-                color:white;
-                border:2px solid white;
-                border-radius:15px;
-                padding:3px 8px;
-                font-size:13px;
-                font-weight:bold;
-                box-shadow:0 0 5px rgba(0,0,0,0.3);
-                white-space:nowrap;
-              ">📍 ${user_id}</div>
-            `;
             if (!userMarker.current) {
               userMarker.current = new window.kakao.maps.CustomOverlay({
                 position,
@@ -143,47 +152,33 @@ function App() {
               userMarker.current.setMap(map);
             } else {
               userMarker.current.setPosition(position);
+              userMarker.current.setContent(markerContent);
             }
           }
-          // 🔹 다른 유저 표시 (관리자만)
+          // ✅ 다른 유저 위치: 관리자만 표시
           else if (canViewOthers) {
-            const markerContent = document.createElement("div");
-            markerContent.innerHTML = `
-              <div style="
-                background:${color};
-                color:white;
-                border:2px solid white;
-                border-radius:15px;
-                padding:3px 8px;
-                font-size:12px;
-                font-weight:bold;
-                box-shadow:0 0 5px rgba(0,0,0,0.3);
-                white-space:nowrap;
-              ">👤 ${user_id} (${action})</div>
-            `;
             if (!otherUsers.current[user_id]) {
               const overlay = new window.kakao.maps.CustomOverlay({
                 position,
                 content: markerContent,
                 yAnchor: 1.3,
-                zIndex: 9999,
+                zIndex: 9998,
               });
               overlay.setMap(map);
               otherUsers.current[user_id] = overlay;
             } else {
               otherUsers.current[user_id].setPosition(position);
+              otherUsers.current[user_id].setContent(markerContent);
             }
           }
         }
       )
       .subscribe();
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => supabase.removeChannel(channel);
   }, [map, user, canViewOthers]);
 
-  // ✅ Supabase 상태 업데이트 + GPS 저장
+  // ✅ Supabase 상태 업데이트 + 위치 저장
   const updateStatus = async (meterIds, newStatus) => {
     const updated = data.map((d) =>
       meterIds.includes(d.meter_id) ? { ...d, status: newStatus } : d
@@ -193,7 +188,7 @@ function App() {
     await supabase.from("meters").upsert(payload, { onConflict: ["meter_id", "address"] });
     console.log("✅ 상태 저장 완료");
 
-    // 📍 현재 위치 1회 저장
+    // 📍 현재 GPS 위치 1회 저장
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(async (pos) => {
         const lat = pos.coords.latitude;
