@@ -115,14 +115,13 @@ function App() {
 
           const color =
             user_id === user
-              ? "#3498db" // 내 위치 (파랑)
+              ? "#3498db"
               : action === "완료"
               ? "#2ecc71"
               : action === "불가"
               ? "#e74c3c"
-              : "#95a5a6"; // 회색
+              : "#95a5a6";
 
-          // 📍 마커 스타일 (말풍선 느낌)
           const markerContent = document.createElement("div");
           markerContent.innerHTML = `
             <div style="
@@ -140,7 +139,6 @@ function App() {
             </div>
           `;
 
-          // ✅ 본인 위치: 항상 표시
           if (user_id === user) {
             if (!userMarker.current) {
               userMarker.current = new window.kakao.maps.CustomOverlay({
@@ -154,9 +152,7 @@ function App() {
               userMarker.current.setPosition(position);
               userMarker.current.setContent(markerContent);
             }
-          }
-          // ✅ 다른 유저 위치: 관리자만 표시
-          else if (canViewOthers) {
+          } else if (canViewOthers) {
             if (!otherUsers.current[user_id]) {
               const overlay = new window.kakao.maps.CustomOverlay({
                 position,
@@ -178,30 +174,45 @@ function App() {
     return () => supabase.removeChannel(channel);
   }, [map, user, canViewOthers]);
 
-  // ✅ Supabase 상태 업데이트 + 위치 저장
+  // ✅ Supabase 상태 업데이트 + 위치 저장 + 데이터 즉시 갱신
   const updateStatus = async (meterIds, newStatus) => {
-    const updated = data.map((d) =>
-      meterIds.includes(d.meter_id) ? { ...d, status: newStatus } : d
-    );
-    setData(updated);
-    const payload = updated.filter((d) => meterIds.includes(d.meter_id));
-    await supabase.from("meters").upsert(payload, { onConflict: ["meter_id", "address"] });
-    console.log("✅ 상태 저장 완료");
+    try {
+      console.log(`🔘 상태 변경 요청: ${newStatus} (${meterIds.length}개)`);
 
-    // 📍 현재 GPS 위치 1회 저장
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(async (pos) => {
-        const lat = pos.coords.latitude;
-        const lng = pos.coords.longitude;
-        await supabase.from("user_locations").upsert({
-          user_id: user,
-          lat,
-          lng,
-          action: newStatus,
-          updated_at: new Date().toISOString(),
+      // 1️⃣ 상태 로컬 반영
+      const updated = data.map((d) =>
+        meterIds.includes(d.meter_id) ? { ...d, status: newStatus } : d
+      );
+      setData(updated);
+
+      // 2️⃣ Supabase 저장
+      const payload = updated.filter((d) => meterIds.includes(d.meter_id));
+      const { error } = await supabase
+        .from("meters")
+        .upsert(payload, { onConflict: ["meter_id", "address"] });
+      if (error) throw error;
+      console.log("✅ Supabase 상태 저장 완료");
+
+      // 3️⃣ 현재 GPS 위치 저장
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(async (pos) => {
+          const lat = pos.coords.latitude;
+          const lng = pos.coords.longitude;
+          await supabase.from("user_locations").upsert({
+            user_id: user,
+            lat,
+            lng,
+            action: newStatus,
+            updated_at: new Date().toISOString(),
+          });
+          console.log(`📍 ${user} 위치 저장 완료 (${newStatus})`);
         });
-        console.log(`📍 ${user} 위치 저장 완료 (${newStatus})`);
-      });
+      }
+
+      // 4️⃣ UI 갱신 (즉시 반영)
+      await loadDataFromDB();
+    } catch (err) {
+      console.error("❌ updateStatus() 오류:", err.message);
     }
   };
 
