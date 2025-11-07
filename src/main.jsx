@@ -39,10 +39,18 @@ function App() {
     } else alert("로그인 실패");
   };
 
-  // ✅ 엑셀 + DB 병합
+  // ✅ 엑셀 + DB 병합 (오류 수정 버전)
   const loadExcelAndDB = async (fileName) => {
     console.log("📂 엑셀 로드 시도:", fileName);
-    const { data: excelBlob } = await supabase.storage.from("excels").download(fileName);
+    const { data: excelBlob, error: excelError } = await supabase.storage
+      .from("excels")
+      .download(fileName);
+
+    if (excelError || !excelBlob) {
+      console.error("❌ 엑셀 파일 불러오기 실패:", excelError?.message);
+      return;
+    }
+
     const blob = await excelBlob.arrayBuffer();
     const workbook = XLSX.read(blob, { type: "array" });
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
@@ -52,17 +60,26 @@ function App() {
       meter_id: r["계기번호"],
       address: r["주소"],
       status: r["진행"] || "미방문",
-      owner_id: user, // 자동 추가
+      owner_id: user,
     }));
 
-    const { data: dbData } = await supabase.from("meters").select("*");
+    const { data: dbData, error: dbError } = await supabase.from("meters").select("*");
+    if (dbError) {
+      console.error("❌ DB 데이터 불러오기 실패:", dbError.message);
+      setData(baseData);
+      return;
+    }
+
     const merged = baseData.map((x) => {
       const match = dbData?.find(
         (d) => d.meter_id === x.meter_id && d.address === x.address
       );
-      return match ? { ...x, status: match.status, owner_id: d?.owner_id || user } : x;
+      return match
+        ? { ...x, status: match.status, owner_id: match.owner_id || user }
+        : x;
     });
 
+    console.log("✅ 데이터 병합 완료:", merged.length);
     setData(merged);
   };
 
@@ -80,7 +97,7 @@ function App() {
     );
   };
 
-  // ✅ Kakao 지도 로드 + 내 위치 중심 이동 (안정화 버전)
+  // ✅ Kakao 지도 로드 (안정화 버전)
   useEffect(() => {
     if (!loggedIn) return;
 
@@ -114,7 +131,6 @@ function App() {
             const lng = pos.coords.longitude;
             const locPosition = new window.kakao.maps.LatLng(lat, lng);
             mapInstance.setCenter(locPosition);
-            console.log("📍 내 위치로 지도 이동 완료");
             showMyLocationMarker(lat, lng, mapInstance);
           },
           (err) => console.warn("⚠️ 위치 정보를 가져올 수 없습니다:", err.message)
@@ -125,7 +141,6 @@ function App() {
       console.log("✅ Kakao 지도 초기화 완료");
     };
 
-    // ✅ 이미 로드된 경우
     if (window.kakao && window.kakao.maps) {
       initializeMap();
     } else {
@@ -174,7 +189,7 @@ function App() {
     }
   };
 
-  // ✅ 지도 타입 전환 (스카이뷰 버튼)
+  // ✅ 지도 타입 전환
   const toggleMapType = () => {
     if (!map) return;
     const nextType = mapType === "ROADMAP" ? "SKYVIEW" : "ROADMAP";
@@ -190,13 +205,14 @@ function App() {
   // ✅ 상태 변경
   const updateStatus = async (meterIds, newStatus) => {
     const updated = data.map((d) =>
-      meterIds.includes(d.meter_id) ? { ...d, status: newStatus, owner_id: d.owner_id || user } : d
+      meterIds.includes(d.meter_id)
+        ? { ...d, status: newStatus, owner_id: d.owner_id || user }
+        : d
     );
     setData(updated);
     const payload = updated.filter((d) => meterIds.includes(d.meter_id));
 
     await supabase.from("meters").upsert(payload, { onConflict: ["meter_id", "address"] });
-    console.log("✅ 상태 업데이트 완료");
 
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(async (pos) => {
@@ -216,7 +232,7 @@ function App() {
     await loadDataFromDB();
   };
 
-  // ✅ Geocoder 캐싱
+  // ✅ 주소 캐싱
   const geocodeAddress = (geocoder, address) =>
     new Promise((resolve) => {
       if (geoCache[address]) return resolve(geoCache[address]);
@@ -384,7 +400,7 @@ function App() {
         )}
       </div>
 
-      {/* 지도 타입 전환 버튼 (왼쪽 하단) */}
+      {/* 지도 타입 전환 버튼 */}
       <div
         style={{
           position: "absolute",
