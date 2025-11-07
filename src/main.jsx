@@ -19,12 +19,12 @@ function App() {
   const [mapType, setMapType] = useState(localStorage.getItem("mapType") || "ROADMAP");
 
   const geoCache = JSON.parse(localStorage.getItem("geoCache") || "{}");
-  const markers = useRef([]);
   const clusterer = useRef(null);
   const activeOverlay = useRef(null);
   const userMarker = useRef(null);
+  const otherUserMarkers = useRef([]);
 
-  // ✅ 로그인 처리
+  // ✅ 로그인
   const handleLogin = async (e) => {
     e.preventDefault();
     console.log("🔐 로그인 시도:", user);
@@ -46,6 +46,7 @@ function App() {
     const workbook = XLSX.read(blob, { type: "array" });
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     const json = XLSX.utils.sheet_to_json(sheet);
+
     const baseData = json.map((r) => ({
       meter_id: r["계기번호"],
       address: r["주소"],
@@ -59,6 +60,7 @@ function App() {
       return match ? { ...x, status: match.status, owner_id: match.owner_id } : x;
     });
 
+    console.log("✅ 데이터 병합 완료:", merged.length);
     setData(merged);
   };
 
@@ -74,9 +76,9 @@ function App() {
   }, [loggedIn]);
 
   const initMap = () => {
-    const mapContainer = document.getElementById("map");
-    const mapInstance = new window.kakao.maps.Map(mapContainer, {
-      center: new window.kakao.maps.LatLng(37.5665, 126.9780),
+    const container = document.getElementById("map");
+    const mapInstance = new window.kakao.maps.Map(container, {
+      center: new window.kakao.maps.LatLng(36.3504, 127.3845),
       level: 6,
       mapTypeId:
         mapType === "SKYVIEW"
@@ -91,23 +93,37 @@ function App() {
       minLevel: 5,
     });
 
+    // ✅ 클러스터 클릭 시 확대
+    window.kakao.maps.event.addListener(clusterer.current, "clusterclick", (cluster) => {
+      const level = mapInstance.getLevel() - 1;
+      mapInstance.setLevel(level, { anchor: cluster.getCenter() });
+    });
+
+    // ✅ 지도 클릭 시 팝업 닫기
+    window.kakao.maps.event.addListener(mapInstance, "click", () => {
+      if (activeOverlay.current) {
+        activeOverlay.current.setMap(null);
+        activeOverlay.current = null;
+      }
+    });
+
+    // ✅ 내 위치 중심 이동
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition((pos) => {
         const lat = pos.coords.latitude;
         const lng = pos.coords.longitude;
-        const locPosition = new window.kakao.maps.LatLng(lat, lng);
-        mapInstance.setCenter(locPosition);
+        const loc = new window.kakao.maps.LatLng(lat, lng);
+        mapInstance.setCenter(loc);
         showMyLocationMarker(lat, lng, mapInstance);
       });
     }
 
-    window.kakao.maps.event.addListener(mapInstance, "click", () => {
-      if (activeOverlay.current) activeOverlay.current.setMap(null);
-    });
+    // ✅ 관리자일 경우 타 유저 위치 불러오기
+    if (canViewOthers) loadOtherUserLocations(mapInstance);
   };
 
   // ✅ 내 위치 마커
-  const showMyLocationMarker = (lat, lng, mapInstance = map) => {
+  const showMyLocationMarker = (lat, lng, mapInstance) => {
     const content = document.createElement("div");
     content.innerHTML = `<div style="background:#3182f6;color:white;border-radius:15px;padding:3px 8px;font-size:13px;font-weight:bold;">📍 ${user}</div>`;
     const position = new window.kakao.maps.LatLng(lat, lng);
@@ -121,20 +137,28 @@ function App() {
     } else userMarker.current.setPosition(position);
   };
 
-  // ✅ 주소 → 좌표
-  const geocodeAddress = (geocoder, address) =>
-    new Promise((resolve) => {
-      if (geoCache[address]) return resolve(geoCache[address]);
-      geocoder.addressSearch(address, (result, status) => {
-        if (status === window.kakao.maps.services.Status.OK) {
-          const lat = parseFloat(result[0].y);
-          const lng = parseFloat(result[0].x);
-          geoCache[address] = { lat, lng };
-          localStorage.setItem("geoCache", JSON.stringify(geoCache));
-          resolve({ lat, lng });
-        } else resolve(null);
+  // ✅ 다른 유저 위치 표시 (관리자용)
+  const loadOtherUserLocations = async (mapInstance) => {
+    const { data: locs } = await supabase.from("user_locations").select("*");
+    otherUserMarkers.current.forEach((m) => m.setMap(null));
+    otherUserMarkers.current = [];
+
+    locs
+      .filter((l) => l.user_id !== user)
+      .forEach((l) => {
+        const content = document.createElement("div");
+        content.innerHTML = `<div style="background:#FFB100;color:white;border-radius:15px;padding:3px 8px;font-size:13px;font-weight:bold;">📍 ${l.user_id}</div>`;
+        const marker = new window.kakao.maps.CustomOverlay({
+          position: new window.kakao.maps.LatLng(l.lat, l.lng),
+          content,
+          yAnchor: 1.3,
+        });
+        marker.setMap(mapInstance);
+        otherUserMarkers.current.push(marker);
       });
-    });
+
+    console.log("👥 타 유저 위치 마커 수:", otherUserMarkers.current.length);
+  };
 
   // ✅ 마커 렌더링
   useEffect(() => {
@@ -150,50 +174,52 @@ function App() {
       const coords = await geocodeAddress(geocoder, row.address);
       if (!coords) continue;
       const position = new window.kakao.maps.LatLng(coords.lat, coords.lng);
-
       const marker = new window.kakao.maps.Marker({ position });
       newMarkers.push(marker);
 
-      window.kakao.maps.event.addListener(marker, "click", () => {
-        if (activeOverlay.current) activeOverlay.current.setMap(null);
-        const popupEl = document.createElement("div");
-        popupEl.style.cssText =
-          "background:white;padding:10px;border:1px solid #ccc;border-radius:8px;";
-        popupEl.innerHTML = `<b>${row.address}</b><br/>계기번호: ${row.meter_id}<hr/>`;
-
-        ["완료", "불가", "미방문"].forEach((text) => {
-          const btn = document.createElement("button");
-          btn.textContent = text;
-          btn.style.marginRight = "5px";
-          btn.onclick = async (e) => {
-            e.stopPropagation();
-            await updateStatus([row.meter_id], text);
-          };
-          popupEl.appendChild(btn);
-        });
-
-        if (canViewOthers && row.owner_id) {
-          const info = document.createElement("div");
-          info.innerHTML = `📌 담당자: <b>${row.owner_id}</b><br/>🕒 수정시각: ${new Date().toLocaleString()}`;
-          popupEl.appendChild(document.createElement("hr"));
-          popupEl.appendChild(info);
-        }
-
-        const popupOverlay = new window.kakao.maps.CustomOverlay({
-          position,
-          content: popupEl,
-          yAnchor: 1.5,
-        });
-        popupOverlay.setMap(map);
-        activeOverlay.current = popupOverlay;
-      });
+      window.kakao.maps.event.addListener(marker, "click", () => openPopup(row, position));
     }
 
     clusterer.current.clear();
     clusterer.current.addMarkers(newMarkers);
   };
 
-  // ✅ 상태 업데이트 (Supabase 반영)
+  // ✅ 팝업 열기
+  const openPopup = (row, position) => {
+    if (activeOverlay.current) activeOverlay.current.setMap(null);
+
+    const popupEl = document.createElement("div");
+    popupEl.style.cssText =
+      "background:white;padding:10px;border:1px solid #ccc;border-radius:8px;max-width:220px;";
+    popupEl.innerHTML = `<b>${row.address}</b><br/>계기번호: ${row.meter_id}<hr/>`;
+
+    ["완료", "불가", "미방문"].forEach((text) => {
+      const btn = document.createElement("button");
+      btn.textContent = text;
+      btn.style.marginRight = "5px";
+      btn.onclick = async (e) => {
+        e.stopPropagation();
+        await updateStatus([row.meter_id], text);
+      };
+      popupEl.appendChild(btn);
+    });
+
+    if (canViewOthers && row.owner_id) {
+      const info = document.createElement("div");
+      info.innerHTML = `<hr/>📌 담당자: ${row.owner_id}<br/>🕒 ${new Date().toLocaleString()}`;
+      popupEl.appendChild(info);
+    }
+
+    const overlay = new window.kakao.maps.CustomOverlay({
+      position,
+      content: popupEl,
+      yAnchor: 1.5,
+    });
+    overlay.setMap(map);
+    activeOverlay.current = overlay;
+  };
+
+  // ✅ 상태 업데이트
   const updateStatus = async (meterIds, newStatus) => {
     const updated = data.map((d) =>
       meterIds.includes(d.meter_id)
@@ -216,22 +242,6 @@ function App() {
         : window.kakao.maps.MapTypeId.ROADMAP
     );
   };
-
-  // ✅ Realtime 구독 (관리자 전용)
-  useEffect(() => {
-    if (!canViewOthers) return;
-    const channel = supabase
-      .channel("realtime:meters")
-      .on("postgres_changes", { event: "*", schema: "public", table: "meters" }, (payload) => {
-        console.log("🔄 실시간 변경 감지:", payload);
-        loadData("data1.xlsx"); // 변경 시 데이터 새로고침
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [canViewOthers]);
 
   // ✅ UI
   if (!loggedIn)
@@ -270,10 +280,11 @@ function App() {
       >
         ✅ 완료: {counts["완료"] || 0} | ❌ 불가: {counts["불가"] || 0} | 🟦 미방문:{" "}
         {counts["미방문"] || 0}
-        {canViewOthers && <span style={{ marginLeft: "10px", color: "#ff7f00" }}>🧭 관리자</span>}
+        {canViewOthers && (
+          <span style={{ marginLeft: "10px", color: "#ff7f00" }}>🧭 관리자모드</span>
+        )}
       </div>
 
-      {/* 스카이뷰 전환 버튼 */}
       <div
         style={{
           position: "absolute",
