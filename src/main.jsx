@@ -15,6 +15,7 @@ function App() {
   const [data, setData] = useState([]);
   const [map, setMap] = useState(null);
   const [counts, setCounts] = useState({ 완료: 0, 불가: 0, 미방문: 0 });
+  const [dataFile, setDataFile] = useState(null);
   const [userPosition, setUserPosition] = useState(null);
 
   const activeOverlay = useRef(null);
@@ -26,19 +27,17 @@ function App() {
     e.preventDefault();
     console.log("🔐 로그인 시도:", user);
     const { data: users, error } = await supabase.from("users").select("*").eq("id", user);
-    if (error) {
-      console.error("❌ Supabase 오류:", error.message);
-      return;
-    }
+    if (error) return console.error("❌ Supabase 오류:", error.message);
     if (users?.length && users[0].password === password) {
       console.log("✅ 로그인 성공:", users[0]);
-      await loadData(users[0].data_file);
+      setDataFile(users[0].data_file);
+      await loadExcelAndDB(users[0].data_file);
       setLoggedIn(true);
     } else alert("로그인 실패");
   };
 
   // ✅ 엑셀 + DB 병합
-  const loadData = async (fileName) => {
+  const loadExcelAndDB = async (fileName) => {
     console.log("📂 엑셀 로드 시도:", fileName);
     const { data: excelBlob } = await supabase.storage.from("excels").download(fileName);
     const blob = await excelBlob.arrayBuffer();
@@ -60,7 +59,24 @@ function App() {
       return match ? { ...x, status: match.status } : x;
     });
 
+    console.log("✅ 데이터 병합 완료:", merged.length);
     setData(merged);
+  };
+
+  // ✅ DB 최신 상태만 불러오기
+  const loadDataFromDB = async () => {
+    console.log("🔄 DB로부터 최신 상태 불러오기...");
+    const { data: dbData, error } = await supabase.from("meters").select("*");
+    if (error) return console.error("❌ DB 불러오기 실패:", error.message);
+
+    setData((prev) =>
+      prev.map((d) => {
+        const match = dbData.find(
+          (r) => r.meter_id === d.meter_id && r.address === d.address
+        );
+        return match ? { ...d, status: match.status } : d;
+      })
+    );
   };
 
   // ✅ Kakao 지도 로드
@@ -70,13 +86,10 @@ function App() {
     script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${KAKAO_KEY}&autoload=false&libraries=services`;
     script.onload = () => {
       window.kakao.maps.load(() => {
-        const mapInstance = new window.kakao.maps.Map(
-          document.getElementById("map"),
-          {
-            center: new window.kakao.maps.LatLng(37.5665, 126.9780),
-            level: 6,
-          }
-        );
+        const mapInstance = new window.kakao.maps.Map(document.getElementById("map"), {
+          center: new window.kakao.maps.LatLng(37.5665, 126.9780),
+          level: 6,
+        });
         console.log("✅ Kakao 지도 초기화 완료");
         setMap(mapInstance);
       });
@@ -97,7 +110,6 @@ function App() {
       const lng = pos.coords.longitude;
       setUserPosition({ lat, lng });
 
-      // 내 위치 마커 표시
       if (!window.myLocationMarker) {
         const marker = new window.kakao.maps.Marker({
           position: new window.kakao.maps.LatLng(lat, lng),
@@ -105,20 +117,8 @@ function App() {
           title: "내 위치",
         });
         window.myLocationMarker = marker;
-        const circle = new window.kakao.maps.Circle({
-          center: new window.kakao.maps.LatLng(lat, lng),
-          radius: 30,
-          strokeWeight: 2,
-          strokeColor: "#1E90FF",
-          strokeOpacity: 0.8,
-          fillColor: "#1E90FF",
-          fillOpacity: 0.3,
-        });
-        circle.setMap(map);
-        window.myLocationCircle = circle;
       } else {
         window.myLocationMarker.setPosition(new window.kakao.maps.LatLng(lat, lng));
-        window.myLocationCircle.setPosition(new window.kakao.maps.LatLng(lat, lng));
       }
     };
 
@@ -249,8 +249,11 @@ function App() {
       });
     });
 
-    window.kakao.maps.event.addListener(map, "click", () => {
+    // ✅ 지도 클릭 → 팝업 닫기 + DB 새로고침
+    window.kakao.maps.event.addListener(map, "click", async () => {
+      console.log("🧩 지도 클릭 발생 — 팝업 닫기 + DB 동기화 시도");
       if (activeOverlay.current) activeOverlay.current.setMap(null);
+      await loadDataFromDB();
     });
   };
 
@@ -264,34 +267,6 @@ function App() {
     await supabase.from("meters").upsert(payload, { onConflict: ["meter_id", "address"] });
     console.log("✅ Supabase 저장 완료");
   };
-
-  // ✅ Realtime Sync
-  useEffect(() => {
-    if (!loggedIn) return;
-    console.log("🔄 Realtime 구독 시작");
-    const channel = supabase
-      .channel("public:meters")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "meters" },
-        (payload) => {
-          console.log("🛰️ 실시간 변경 감지:", payload);
-          setData((prev) =>
-            prev.map((d) =>
-              d.meter_id === payload.new.meter_id && d.address === payload.new.address
-                ? { ...d, status: payload.new.status }
-                : d
-            )
-          );
-        }
-      )
-      .subscribe();
-
-    return () => {
-      console.log("❎ Realtime 구독 해제");
-      supabase.removeChannel(channel);
-    };
-  }, [loggedIn]);
 
   if (!loggedIn)
     return (
