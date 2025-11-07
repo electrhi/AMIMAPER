@@ -234,6 +234,7 @@ function App() {
             e.stopPropagation();
             console.log(`🔘 ${text} 버튼 클릭`);
             await updateStatus(list.map((g) => g.meter_id), text);
+            await loadDataFromDB(); // ✅ 버튼 클릭 후 최신화
           });
           popupEl.appendChild(btn);
         });
@@ -249,11 +250,9 @@ function App() {
       });
     });
 
-    // ✅ 지도 클릭 → 팝업 닫기 + DB 새로고침
-    window.kakao.maps.event.addListener(map, "click", async () => {
-      console.log("🧩 지도 클릭 발생 — 팝업 닫기 + DB 동기화 시도");
+    // ✅ 지도 클릭 시 팝업 닫기만 (이제는 새로고침 없음)
+    window.kakao.maps.event.addListener(map, "click", () => {
       if (activeOverlay.current) activeOverlay.current.setMap(null);
-      await loadDataFromDB();
     });
   };
 
@@ -265,7 +264,7 @@ function App() {
     setData(updated);
     const payload = updated.filter((d) => meterIds.includes(d.meter_id));
     await supabase.from("meters").upsert(payload, { onConflict: ["meter_id", "address"] });
-    console.log("✅ Supabase 저장 완료");
+    console.log("✅ Supabase 저장 완료 & 최신화 요청");
   };
 
   if (!loggedIn)
