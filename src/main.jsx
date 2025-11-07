@@ -25,6 +25,38 @@ function App() {
   const userMarker = useRef(null);
   const otherUsers = useRef({});
 
+  // ✅ Supabase 테이블 구조 확인 및 자동 보정
+  const ensureOwnerIdColumn = async () => {
+    try {
+      console.log("🔍 meters 테이블 구조 확인 중...");
+      const { data: columns, error } = await supabase.rpc("pg_table_def", {
+        tablename: "meters",
+      });
+
+      // Supabase에서 pg_table_def 함수가 없을 수 있으므로, try-catch fallback
+      if (error || !columns) {
+        console.log("⚠️ pg_table_def 사용 불가 — 대체 방식 적용");
+        const { error: alterError } = await supabase.rpc("execute_sql", {
+          sql: "ALTER TABLE public.meters ADD COLUMN IF NOT EXISTS owner_id text;",
+        });
+        if (alterError) console.warn("⚠️ 자동 컬럼 추가 실패:", alterError.message);
+        else console.log("✅ owner_id 컬럼 자동 생성 완료");
+      } else {
+        const hasOwnerId = columns.some((c) => c.column_name === "owner_id");
+        if (!hasOwnerId) {
+          console.log("⚙️ owner_id 컬럼 없음 → 자동 생성 시도...");
+          const { error: alterError } = await supabase.rpc("execute_sql", {
+            sql: "ALTER TABLE public.meters ADD COLUMN IF NOT EXISTS owner_id text;",
+          });
+          if (alterError) console.warn("⚠️ 자동 컬럼 추가 실패:", alterError.message);
+          else console.log("✅ owner_id 컬럼 자동 생성 완료");
+        } else console.log("✅ owner_id 컬럼 이미 존재");
+      }
+    } catch (e) {
+      console.warn("⚠️ 테이블 구조 확인 중 오류 (무시 가능):", e.message);
+    }
+  };
+
   // ✅ 로그인
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -35,6 +67,7 @@ function App() {
       console.log("✅ 로그인 성공:", users[0]);
       setDataFile(users[0].data_file);
       setCanViewOthers(!!users[0].can_view_others);
+      await ensureOwnerIdColumn(); // 👈 자동 컬럼 보정
       await loadExcelAndDB(users[0].data_file);
       setLoggedIn(true);
     } else alert("로그인 실패");
@@ -53,7 +86,7 @@ function App() {
       meter_id: r["계기번호"],
       address: r["주소"],
       status: r["진행"] || "미방문",
-      owner_id: user, // 👈 일반 유저 구분용
+      owner_id: user, // ✅ 자동으로 추가
     }));
 
     const { data: dbData } = await supabase.from("meters").select("*");
@@ -99,8 +132,8 @@ function App() {
               ? window.kakao.maps.MapTypeId.HYBRID
               : window.kakao.maps.MapTypeId.ROADMAP,
         });
-        console.log("✅ Kakao 지도 초기화 완료");
         setMap(mapInstance);
+        console.log("✅ Kakao 지도 초기화 완료");
       });
     };
     document.head.appendChild(script);
@@ -119,80 +152,7 @@ function App() {
     map.setMapTypeId(mapTypeId);
   };
 
-  // ✅ 모든 유저의 위치 표시 (Realtime)
-  useEffect(() => {
-    if (!map) return;
-    const channel = supabase
-      .channel("user_location_updates")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "user_locations" },
-        (payload) => {
-          const { user_id, lat, lng, action } = payload.new;
-          const position = new window.kakao.maps.LatLng(lat, lng);
-
-          const color =
-            user_id === user
-              ? "#3498db"
-              : action === "완료"
-              ? "#2ecc71"
-              : action === "불가"
-              ? "#e74c3c"
-              : "#95a5a6";
-
-          const markerContent = document.createElement("div");
-          markerContent.innerHTML = `
-            <div style="
-              background:${color};
-              color:white;
-              border-radius:18px;
-              padding:5px 10px;
-              font-size:13px;
-              font-weight:bold;
-              box-shadow:0 2px 5px rgba(0,0,0,0.3);
-              white-space:nowrap;
-              border:2px solid white;
-            ">
-              📍 ${user_id}
-            </div>
-          `;
-
-          if (user_id === user) {
-            if (!userMarker.current) {
-              userMarker.current = new window.kakao.maps.CustomOverlay({
-                position,
-                content: markerContent,
-                yAnchor: 1.3,
-                zIndex: 9999,
-              });
-              userMarker.current.setMap(map);
-            } else {
-              userMarker.current.setPosition(position);
-              userMarker.current.setContent(markerContent);
-            }
-          } else if (canViewOthers) {
-            if (!otherUsers.current[user_id]) {
-              const overlay = new window.kakao.maps.CustomOverlay({
-                position,
-                content: markerContent,
-                yAnchor: 1.3,
-                zIndex: 9998,
-              });
-              overlay.setMap(map);
-              otherUsers.current[user_id] = overlay;
-            } else {
-              otherUsers.current[user_id].setPosition(position);
-              otherUsers.current[user_id].setContent(markerContent);
-            }
-          }
-        }
-      )
-      .subscribe();
-
-    return () => supabase.removeChannel(channel);
-  }, [map, user, canViewOthers]);
-
-  // ✅ Supabase 상태 업데이트 + 관리자 권한 구분
+  // ✅ Supabase 상태 업데이트
   const updateStatus = async (meterIds, newStatus) => {
     try {
       console.log(`🔘 상태 변경 요청: ${newStatus} (${meterIds.length}개)`);
@@ -208,12 +168,10 @@ function App() {
         await supabase.rpc("upsert_meters_admin", { rows: payload });
       } else {
         console.log("👤 일반 사용자: 본인 데이터만 수정");
-        await supabase
-          .from("meters")
-          .upsert(payload, { onConflict: ["meter_id", "address"] });
+        await supabase.from("meters").upsert(payload, { onConflict: ["meter_id", "address"] });
       }
 
-      // 📍 현재 GPS 위치 저장
+      // 위치 기록
       if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(async (pos) => {
           const lat = pos.coords.latitude;
@@ -258,6 +216,7 @@ function App() {
   const renderMarkers = async () => {
     markers.current.forEach((m) => m.setMap(null));
     markers.current = [];
+
     const geocoder = new window.kakao.maps.services.Geocoder();
     const grouped = {};
     const statusCount = { 완료: 0, 불가: 0, 미방문: 0 };
@@ -371,7 +330,7 @@ function App() {
 
   return (
     <div style={{ width: "100%", height: "100vh", position: "relative" }}>
-      {/* 상태 바 */}
+      {/* 상단 상태바 */}
       <div
         style={{
           position: "absolute",
@@ -392,7 +351,7 @@ function App() {
         )}
       </div>
 
-      {/* 지도 타입 버튼 (왼쪽 하단) */}
+      {/* 지도 타입 전환 버튼 */}
       <div
         style={{
           position: "absolute",
