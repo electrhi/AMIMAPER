@@ -277,42 +277,49 @@ const renderMarkers = async () => {
         overlay.setMap(map);
         markers.push(overlay);
 
-        /** 📌 마커 클릭 **/
-        const openPopup = (e) => {
-          e.stopPropagation();
-          const old = getActiveOverlay();
-          if (old) old.setMap(null);
-          console.log(`[DEBUG][MAP] 🖱️ 마커 클릭됨: ${list[0].address}`);
-          const popupEl = document.createElement("div");
-          popupEl.style.cssText = `
-            background:white;
-            padding:10px;
-            border:1px solid #ccc;
-            border-radius:8px;
-            width:230px;
-            box-shadow:0 2px 8px rgba(0,0,0,0.2);
-          `;
+/** 📌 마커 클릭 **/
+const openPopup = async (e) => {
+  e.stopPropagation();
 
-          ["mousedown", "click", "touchstart"].forEach((ev) =>
-            popupEl.addEventListener(ev, (e) => e.stopPropagation())
-          );
+  // ✅ 최신 데이터 반영 (팝업 열기 전)
+  const latestData = await fetchLatestStatus();
 
-          const title = document.createElement("b");
-          title.textContent = list[0].address;
-          popupEl.appendChild(title);
-          popupEl.appendChild(document.createElement("br"));
-          popupEl.appendChild(document.createElement("br"));
+  const old = getActiveOverlay();
+  if (old) old.setMap(null);
+  console.log(`[DEBUG][MAP] 🖱️ 마커 클릭됨: ${list[0].address}`);
 
-          const last2 = list.map((g) => g.meter_id.slice(-2));
-          const duplicates = last2.filter((x, i) => last2.indexOf(x) !== i);
-          list.forEach((g) => {
-            const div = document.createElement("div");
-            div.textContent = g.meter_id;
-            if (duplicates.includes(g.meter_id.slice(-2))) div.style.color = "red";
-            popupEl.appendChild(div);
-          });
+  const popupEl = document.createElement("div");
+  popupEl.style.cssText = `
+    background:white;
+    padding:10px;
+    border:1px solid #ccc;
+    border-radius:8px;
+    width:230px;
+    box-shadow:0 2px 8px rgba(0,0,0,0.2);
+  `;
 
-          popupEl.appendChild(document.createElement("hr"));
+  ["mousedown", "click", "touchstart"].forEach((ev) =>
+    popupEl.addEventListener(ev, (e) => e.stopPropagation())
+  );
+
+  const title = document.createElement("b");
+  title.textContent = list[0].address;
+  popupEl.appendChild(title);
+  popupEl.appendChild(document.createElement("br"));
+  popupEl.appendChild(document.createElement("br"));
+
+  // ✅ 중복 계기번호 빨간색 표시
+  const last2 = list.map((g) => g.meter_id.slice(-2));
+  const duplicates = last2.filter((x, i) => last2.indexOf(x) !== i);
+  list.forEach((g) => {
+    const div = document.createElement("div");
+    div.textContent = g.meter_id;
+    if (duplicates.includes(g.meter_id.slice(-2))) div.style.color = "red";
+    popupEl.appendChild(div);
+  });
+
+  popupEl.appendChild(document.createElement("hr"));
+
 
           const buttons = ["완료", "불가", "미방문", "가기"];
           buttons.forEach((text) => {
@@ -408,10 +415,47 @@ const renderMarkers = async () => {
       console.error("[ERROR][STATUS] 저장 실패:", e.message);
     }
   };
+  
+/** ✅ 추가: Supabase 최신 상태 불러오기 **/
+const fetchLatestStatus = async () => {
+  try {
+    console.log("[DEBUG][SYNC] 🔄 Supabase 최신 상태 재동기화 시작...");
+    const { data: fresh, error } = await supabase
+      .from("meters")
+      .select("*")
+      .order("updated_at", { ascending: false });
+    if (error) throw error;
+
+    // 최신 상태 반영
+    const latestMap = {};
+    fresh.forEach((row) => {
+      if (!latestMap[row.meter_id]) latestMap[row.meter_id] = row;
+    });
+    const updated = data.map((d) =>
+      latestMap[d.meter_id]
+        ? { ...d, status: latestMap[d.meter_id].status }
+        : d
+    );
+
+    setData(updated);
+    console.log("[DEBUG][SYNC] ✅ 최신 상태 반영 완료:", updated.length);
+    return updated;
+  } catch (err) {
+    console.error("[ERROR][SYNC] 상태 갱신 실패:", err.message);
+    return data;
+  }
+};
 
 /** 관리자 모드 **/
+let otherUserOverlays = []; // ✅ 추가: 전역 배열로 다른 유저 마커 추적
+
 const loadOtherUserLocations = async () => {
   if (!map) return;
+
+  // ✅ 추가: 기존 관리자 마커 제거
+  otherUserOverlays.forEach((ov) => ov.setMap(null));
+  otherUserOverlays = [];
+
   const { data: logs, error } = await supabase
     .from("meters")
     .select("address, lat, lng, status, user_id, updated_at")
@@ -443,13 +487,13 @@ const loadOtherUserLocations = async () => {
     `;
     markerEl.textContent = uid;
 
-    // ✅ 변경: 관리자 마커를 일반 마커 아래쪽으로 이동
     const overlay = new window.kakao.maps.CustomOverlay({
       position: coord,
       content: markerEl,
-      yAnchor: 1.6, // 기존 1.2 → 1.6
+      yAnchor: 1.6,
     });
     overlay.setMap(map);
+    otherUserOverlays.push(overlay); // ✅ 추가
   });
 };
 
