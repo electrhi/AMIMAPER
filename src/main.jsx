@@ -342,6 +342,7 @@ const updateStatus = async (meterIds, newStatus, coords) => {
       user_id: currentUser.id,
       lat: parseFloat(coords.lat),
       lng: parseFloat(coords.lng),
+      updated_at: new Date().toISOString(), // ✅ 수정: 최신 위치 구분용
     }));
 
     // 2️⃣ Supabase에 저장
@@ -367,11 +368,15 @@ const updateStatus = async (meterIds, newStatus, coords) => {
     // 5️⃣ 관리자 모드일 경우 다른 위치 표시
     if (currentUser.can_view_others) await loadOtherUserLocations();
 
-    // ✅ 6️⃣ 팝업 닫기
+    // ✅ 6️⃣ 팝업 닫기 (무조건 보장)
     if (activeOverlay) {
-      activeOverlay.setMap(null);
+      try {
+        activeOverlay.setMap(null);
+        console.log("[DEBUG][POPUP] ✅ 팝업 닫힘 (updateStatus 후 보장)");
+      } catch (e) {
+        console.warn("[WARN][POPUP] 팝업 닫기 중 오류:", e.message);
+      }
       activeOverlay = null;
-      console.log("[DEBUG][POPUP] ✅ 팝업 닫힘 (버튼 클릭 후)");
     }
 
     console.log("[DEBUG][STATUS] 🔁 전체 지도 최신화 완료");
@@ -381,45 +386,48 @@ const updateStatus = async (meterIds, newStatus, coords) => {
 };
 
 
-  /** 관리자 모드 **/
-  const loadOtherUserLocations = async () => {
-    if (!map) return;
-    const { data: logs, error } = await supabase
-      .from("meters")
-      .select("address, lat, lng, status, user_id")
-      .not("user_id", "is", null);
-    if (error) throw error;
+/** 관리자 모드 **/
+const loadOtherUserLocations = async () => {
+  if (!map) return;
+  const { data: logs, error } = await supabase
+    .from("meters")
+    .select("address, lat, lng, status, user_id, updated_at") // ✅ 수정: updated_at 포함
+    .not("user_id", "is", null)
+    .order("updated_at", { ascending: false }); // ✅ 수정: 최신순 정렬
 
-    const latest = {};
-    logs.forEach((l) => {
-      if (!l.user_id || !l.lat || !l.lng) return;
-      latest[l.user_id] = l;
+  if (error) throw error;
+
+  const latest = {};
+  logs.forEach((l) => {
+    if (!l.user_id || !l.lat || !l.lng) return;
+    if (!latest[l.user_id]) latest[l.user_id] = l; // ✅ 수정: user_id당 1개 (가장 최근만)
+  });
+
+  Object.keys(latest).forEach((uid) => {
+    const loc = latest[uid];
+    const coord = new window.kakao.maps.LatLng(loc.lat, loc.lng);
+
+    const markerEl = document.createElement("div");
+    markerEl.style.cssText = `
+      background:purple;
+      border-radius:8px;
+      padding:4px 7px;
+      color:white;
+      font-weight:bold;
+      font-size:11px;
+      box-shadow:0 0 6px rgba(0,0,0,0.4);
+    `;
+    markerEl.textContent = uid;
+
+    const overlay = new window.kakao.maps.CustomOverlay({
+      position: coord,
+      content: markerEl,
+      yAnchor: 1.2, // ✅ 수정: 내 위치 마커보다 살짝 아래쪽으로 표시
     });
+    overlay.setMap(map);
+  });
+};
 
-    Object.keys(latest).forEach((uid) => {
-      const loc = latest[uid];
-      const coord = new window.kakao.maps.LatLng(loc.lat, loc.lng);
-
-      const markerEl = document.createElement("div");
-      markerEl.style.cssText = `
-        background:purple;
-        border-radius:8px;
-        padding:4px 7px;
-        color:white;
-        font-weight:bold;
-        font-size:11px;
-        box-shadow:0 0 6px rgba(0,0,0,0.4);
-      `;
-      markerEl.textContent = uid;
-
-      const overlay = new window.kakao.maps.CustomOverlay({
-        position: coord,
-        content: markerEl,
-        yAnchor: 1,
-      });
-      overlay.setMap(map);
-    });
-  };
 
   /** 로그인 UI **/
   if (!loggedIn)
