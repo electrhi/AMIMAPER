@@ -7,7 +7,7 @@ const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_KEY;
 const KAKAO_KEY = import.meta.env.VITE_KAKAO_JAVASCRIPT_KEY;
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-const otherUserOverlays = useRef([]); // ✅ 기존 let otherUserOverlays = [] 대신
+
 
 
 function App() {
@@ -19,6 +19,8 @@ function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [counts, setCounts] = useState({ 완료: 0, 불가: 0, 미방문: 0 });
   const [mapType, setMapType] = useState("ROADMAP");
+  
+  const otherUserOverlays = useRef([]); // ✅ 기존 let otherUserOverlays = [] 대신
 
   let activeOverlay = null;
   let markers = [];
@@ -449,7 +451,6 @@ const fetchLatestStatus = async () => {
 };
 
 /** 관리자 모드 **/
-let otherUserOverlays = []; // ✅ 추가: 전역 배열로 다른 유저 마커 추적
 
 const loadOtherUserLocations = async () => {
   if (!map) return;
