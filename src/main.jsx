@@ -22,6 +22,10 @@ function App() {
   let markers = [];
   const geoCache = JSON.parse(localStorage.getItem("geoCache") || "{}");
 
+  // ✅ 추가: 팝업 닫기 최신 참조 관리용
+  const getActiveOverlay = () => window.__activeOverlayRef || null;
+  const setActiveOverlay = (ov) => (window.__activeOverlayRef = ov);
+
   /** 로그인 처리 **/
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -151,7 +155,7 @@ function App() {
     }
   }, [map, currentUser]);
 
-  /** 지도 타입 전환 (스카이뷰/일반지도) **/
+  /** 지도 타입 전환 **/
   const toggleMapType = () => {
     if (!map) return;
     const newType = mapType === "ROADMAP" ? "HYBRID" : "ROADMAP";
@@ -164,7 +168,7 @@ function App() {
     setMapType(newType);
   };
 
-  /** 주소 → 좌표 변환 (캐시 포함) **/
+  /** 주소 → 좌표 변환 **/
   const geocodeAddress = (geocoder, address) =>
     new Promise((resolve) => {
       if (geoCache[address]) {
@@ -192,6 +196,7 @@ function App() {
     console.log("[DEBUG][MAP] 🧭 지도 렌더링 시작...");
     renderMarkers();
   }, [map, data]);
+
   /** 마커 렌더링 **/
   const renderMarkers = async () => {
     try {
@@ -250,7 +255,8 @@ function App() {
         /** 📌 마커 클릭 **/
         const openPopup = (e) => {
           e.stopPropagation();
-          if (activeOverlay) activeOverlay.setMap(null);
+          const old = getActiveOverlay();
+          if (old) old.setMap(null);
           console.log(`[DEBUG][MAP] 🖱️ 마커 클릭됨: ${list[0].address}`);
           const popupEl = document.createElement("div");
           popupEl.style.cssText = `
@@ -311,6 +317,7 @@ function App() {
           });
           popupOverlay.setMap(map);
           activeOverlay = popupOverlay;
+          setActiveOverlay(popupOverlay); // ✅ 추가
           console.log("[DEBUG][MAP] 🧩 팝업 표시 완료:", list[0].address);
         };
 
@@ -319,9 +326,12 @@ function App() {
       });
 
       window.kakao.maps.event.addListener(map, "click", () => {
-        if (activeOverlay) {
-          activeOverlay.setMap(null);
-          console.log("[DEBUG][MAP] 🧩 지도 클릭 — 팝업 닫기");
+        const overlay = getActiveOverlay(); // ✅ 추가
+        if (overlay) {
+          overlay.setMap(null);
+          setActiveOverlay(null);
+          activeOverlay = null;
+          console.log("[DEBUG][MAP] 🧩 지도 클릭 — 팝업 닫기 (최신 참조)");
         }
       });
     } catch (e) {
@@ -329,105 +339,92 @@ function App() {
     }
   };
 
-/** 상태 업데이트 **/
-const updateStatus = async (meterIds, newStatus, coords) => {
-  try {
-    console.log("[DEBUG][STATUS] 🛠️ 상태 업데이트 시도:", meterIds, "→", newStatus);
+  /** 상태 업데이트 **/
+  const updateStatus = async (meterIds, newStatus, coords) => {
+    try {
+      console.log("[DEBUG][STATUS] 🛠️ 상태 업데이트 시도:", meterIds, "→", newStatus);
 
-    // 1️⃣ 변경된 데이터 준비
-    const payload = meterIds.map((id) => ({
-      meter_id: id,
-      address: data.find((d) => d.meter_id === id)?.address || "",
-      status: newStatus,
-      user_id: currentUser.id,
-      lat: parseFloat(coords.lat),
-      lng: parseFloat(coords.lng),
-      updated_at: new Date().toISOString(), // ✅ 수정: 최신 위치 구분용
-    }));
+      const payload = meterIds.map((id) => ({
+        meter_id: id,
+        address: data.find((d) => d.meter_id === id)?.address || "",
+        status: newStatus,
+        user_id: currentUser.id,
+        lat: parseFloat(coords.lat),
+        lng: parseFloat(coords.lng),
+        updated_at: new Date().toISOString(),
+      }));
 
-    // 2️⃣ Supabase에 저장
-    const { error: upsertError } = await supabase.from("meters").upsert(payload, {
-      onConflict: ["meter_id", "address"],
-    });
-    if (upsertError) throw upsertError;
-    console.log("[DEBUG][STATUS] ✅ Supabase 업데이트 완료:", payload);
+      const { error: upsertError } = await supabase.from("meters").upsert(payload, {
+        onConflict: ["meter_id", "address"],
+      });
+      if (upsertError) throw upsertError;
+      console.log("[DEBUG][STATUS] ✅ Supabase 업데이트 완료:", payload);
 
-    // 3️⃣ Supabase에서 최신 데이터 다시 불러오기
-    console.log("[DEBUG][SYNC] 🔄 Supabase 최신 데이터 불러오기 시작...");
-    const { data: freshData, error: fetchError } = await supabase
-      .from("meters")
-      .select("*");
-    if (fetchError) throw fetchError;
+      const { data: freshData, error: fetchError } = await supabase
+        .from("meters")
+        .select("*");
+      if (fetchError) throw fetchError;
 
-    console.log("[DEBUG][SYNC] ✅ 최신 데이터 동기화 완료");
+      setData(freshData);
+      await renderMarkers();
 
-    // 4️⃣ state 갱신 후 지도 다시 렌더링
-    setData(freshData);
-    await renderMarkers();
+      if (currentUser.can_view_others) await loadOtherUserLocations();
 
-    // 5️⃣ 관리자 모드일 경우 다른 위치 표시
-    if (currentUser.can_view_others) await loadOtherUserLocations();
-
-    // ✅ 6️⃣ 팝업 닫기 (무조건 보장)
-    if (activeOverlay) {
-      try {
-        activeOverlay.setMap(null);
+      const overlay = getActiveOverlay();
+      if (overlay) {
+        overlay.setMap(null);
+        setActiveOverlay(null);
+        activeOverlay = null;
         console.log("[DEBUG][POPUP] ✅ 팝업 닫힘 (updateStatus 후 보장)");
-      } catch (e) {
-        console.warn("[WARN][POPUP] 팝업 닫기 중 오류:", e.message);
       }
-      activeOverlay = null;
+
+      console.log("[DEBUG][STATUS] 🔁 전체 지도 최신화 완료");
+    } catch (e) {
+      console.error("[ERROR][STATUS] 저장 실패:", e.message);
     }
+  };
 
-    console.log("[DEBUG][STATUS] 🔁 전체 지도 최신화 완료");
-  } catch (e) {
-    console.error("[ERROR][STATUS] 저장 실패:", e.message);
-  }
-};
+  /** 관리자 모드 **/
+  const loadOtherUserLocations = async () => {
+    if (!map) return;
+    const { data: logs, error } = await supabase
+      .from("meters")
+      .select("address, lat, lng, status, user_id, updated_at")
+      .not("user_id", "is", null)
+      .order("updated_at", { ascending: false });
 
+    if (error) throw error;
 
-/** 관리자 모드 **/
-const loadOtherUserLocations = async () => {
-  if (!map) return;
-  const { data: logs, error } = await supabase
-    .from("meters")
-    .select("address, lat, lng, status, user_id, updated_at") // ✅ 수정: updated_at 포함
-    .not("user_id", "is", null)
-    .order("updated_at", { ascending: false }); // ✅ 수정: 최신순 정렬
-
-  if (error) throw error;
-
-  const latest = {};
-  logs.forEach((l) => {
-    if (!l.user_id || !l.lat || !l.lng) return;
-    if (!latest[l.user_id]) latest[l.user_id] = l; // ✅ 수정: user_id당 1개 (가장 최근만)
-  });
-
-  Object.keys(latest).forEach((uid) => {
-    const loc = latest[uid];
-    const coord = new window.kakao.maps.LatLng(loc.lat, loc.lng);
-
-    const markerEl = document.createElement("div");
-    markerEl.style.cssText = `
-      background:purple;
-      border-radius:8px;
-      padding:4px 7px;
-      color:white;
-      font-weight:bold;
-      font-size:11px;
-      box-shadow:0 0 6px rgba(0,0,0,0.4);
-    `;
-    markerEl.textContent = uid;
-
-    const overlay = new window.kakao.maps.CustomOverlay({
-      position: coord,
-      content: markerEl,
-      yAnchor: 1.2, // ✅ 수정: 내 위치 마커보다 살짝 아래쪽으로 표시
+    const latest = {};
+    logs.forEach((l) => {
+      if (!l.user_id || !l.lat || !l.lng) return;
+      if (!latest[l.user_id]) latest[l.user_id] = l;
     });
-    overlay.setMap(map);
-  });
-};
 
+    Object.keys(latest).forEach((uid) => {
+      const loc = latest[uid];
+      const coord = new window.kakao.maps.LatLng(loc.lat, loc.lng);
+
+      const markerEl = document.createElement("div");
+      markerEl.style.cssText = `
+        background:purple;
+        border-radius:8px;
+        padding:4px 7px;
+        color:white;
+        font-weight:bold;
+        font-size:11px;
+        box-shadow:0 0 6px rgba(0,0,0,0.4);
+      `;
+      markerEl.textContent = uid;
+
+      const overlay = new window.kakao.maps.CustomOverlay({
+        position: coord,
+        content: markerEl,
+        yAnchor: 1.2,
+      });
+      overlay.setMap(map);
+    });
+  };
 
   /** 로그인 UI **/
   if (!loggedIn)
@@ -458,7 +455,7 @@ const loadOtherUserLocations = async () => {
     <div style={{ width: "100%", height: "100vh", position: "relative" }}>
       <div
         style={{
-          position: "fixed", // ✅ 모바일에서도 표시되도록 수정
+          position: "fixed",
           top: 10,
           left: 10,
           background: "white",
@@ -476,7 +473,7 @@ const loadOtherUserLocations = async () => {
       <button
         onClick={toggleMapType}
         style={{
-          position: "fixed", // ✅ 고정
+          position: "fixed",
           bottom: 20,
           left: 20,
           zIndex: 999999,
@@ -495,7 +492,7 @@ const loadOtherUserLocations = async () => {
         currentUser?.can_view_others === "y") && (
         <div
           style={{
-            position: "fixed", // ✅ 관리자 표시도 고정
+            position: "fixed",
             bottom: 20,
             right: 20,
             zIndex: 999999,
