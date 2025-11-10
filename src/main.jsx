@@ -15,8 +15,6 @@ function App() {
   const [data, setData] = useState([]);
   const [map, setMap] = useState(null);
   const [counts, setCounts] = useState({ 완료: 0, 불가: 0, 미방문: 0 });
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [isSkyView, setIsSkyView] = useState(false);
 
   let activeOverlay = null;
   let markers = [];
@@ -25,13 +23,15 @@ function App() {
   const handleLogin = async (e) => {
     e.preventDefault();
     console.log("🔐 로그인 시도:", user);
-    const { data: users, error } = await supabase.from("users").select("*").eq("id", user);
+    const { data: users, error } = await supabase
+      .from("users")
+      .select("*")
+      .eq("id", user);
     if (error) return console.error("❌ Supabase 오류:", error.message);
 
     if (users && users.length > 0 && users[0].password === password) {
       console.log("✅ 로그인 성공:", users[0]);
       await loadData(users[0].data_file);
-      setIsAdmin(users[0].is_admin || false);
       setLoggedIn(true);
     } else {
       alert("로그인 실패");
@@ -40,7 +40,9 @@ function App() {
 
   const loadData = async (fileName) => {
     console.log("📂 엑셀 로드 시도:", fileName);
-    const { data: excelBlob, error } = await supabase.storage.from("excels").download(fileName);
+    const { data: excelBlob, error } = await supabase.storage
+      .from("excels")
+      .download(fileName);
     if (error) return console.error("❌ 엑셀 로드 실패:", error.message);
     const blob = await excelBlob.arrayBuffer();
     const workbook = XLSX.read(blob, { type: "array" });
@@ -56,7 +58,9 @@ function App() {
 
     const { data: dbData } = await supabase.from("meters").select("*");
     const merged = baseData.map((x) => {
-      const m = dbData?.find((d) => d.meter_id === x.meter_id && d.address === x.address);
+      const m = dbData?.find(
+        (d) => d.meter_id === x.meter_id && d.address === x.address
+      );
       return m ? { ...x, status: m.status } : x;
     });
 
@@ -71,23 +75,14 @@ function App() {
     script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${KAKAO_KEY}&autoload=false&libraries=services`;
     script.onload = () => {
       window.kakao.maps.load(() => {
-        const mapInstance = new window.kakao.maps.Map(document.getElementById("map"), {
-          center: new window.kakao.maps.LatLng(37.5665, 126.9780),
-          level: 5,
-        });
+        const mapInstance = new window.kakao.maps.Map(
+          document.getElementById("map"),
+          {
+            center: new window.kakao.maps.LatLng(37.5665, 126.9780),
+            level: 5,
+          }
+        );
         console.log("✅ 지도 초기화 완료");
-
-        // ✅ 내 위치 자동 이동 복원
-        if (navigator.geolocation) {
-          navigator.geolocation.getCurrentPosition((pos) => {
-            const loc = new window.kakao.maps.LatLng(pos.coords.latitude, pos.coords.longitude);
-            mapInstance.setCenter(loc);
-            const marker = new window.kakao.maps.Marker({ position: loc });
-            marker.setMap(mapInstance);
-            console.log("📍 내 위치 표시 완료");
-          });
-        }
-
         setMap(mapInstance);
       });
     };
@@ -96,15 +91,22 @@ function App() {
 
   const geocodeAddress = (geocoder, address) =>
     new Promise((resolve) => {
-      if (geoCache[address]) return resolve(geoCache[address]);
+      if (geoCache[address]) {
+        console.log(`💾 캐시 HIT: ${address}`);
+        return resolve(geoCache[address]);
+      }
       geocoder.addressSearch(address, (result, status) => {
         if (status === window.kakao.maps.services.Status.OK) {
-          const lat = parseFloat(result[0].y).toFixed(6);
-          const lng = parseFloat(result[0].x).toFixed(6);
+          const lat = parseFloat(result[0].y).toFixed(4);
+          const lng = parseFloat(result[0].x).toFixed(4);
           geoCache[address] = { lat, lng };
           localStorage.setItem("geoCache", JSON.stringify(geoCache));
+          console.log(`🌐 Geocode 성공: ${address} → (${lat}, ${lng})`);
           resolve({ lat, lng });
-        } else resolve(null);
+        } else {
+          console.warn(`⚠️ 지오코딩 실패: ${address} → ${status}`);
+          resolve(null);
+        }
       });
     });
 
@@ -120,6 +122,7 @@ function App() {
     const geocoder = new window.kakao.maps.services.Geocoder();
     const grouped = {};
     const statusCount = { 완료: 0, 불가: 0, 미방문: 0 };
+
     data.forEach((d) => (statusCount[d.status] = (statusCount[d.status] || 0) + 1));
     setCounts(statusCount);
 
@@ -143,8 +146,12 @@ function App() {
         border-radius:50%;
         color:white;
         font-size:12px;
-        width:30px;height:30px;line-height:30px;text-align:center;
-        cursor:pointer;box-shadow:0 0 5px rgba(0,0,0,0.4);
+        width:30px;
+        height:30px;
+        line-height:30px;
+        text-align:center;
+        cursor:pointer;
+        box-shadow:0 0 5px rgba(0,0,0,0.4);
       `;
       markerEl.textContent = list.length;
 
@@ -156,52 +163,64 @@ function App() {
       overlay.setMap(map);
       markers.push(overlay);
 
-      markerEl.onclick = (e) => {
+      markerEl.addEventListener("click", (e) => {
         e.stopPropagation();
+        console.log("🖱️ 마커 클릭됨:", list[0].address);
+
         if (activeOverlay) activeOverlay.setMap(null);
 
         const popupEl = document.createElement("div");
         popupEl.style.cssText = `
-          background:white;padding:10px;border:1px solid #ccc;border-radius:8px;
+          background:white;
+          padding:10px;
+          border:1px solid #ccc;
+          border-radius:8px;
         `;
+
+        // 🛡️ 지도 클릭보다 우선하도록 이벤트 차단
+        popupEl.addEventListener("mousedown", (e) => {
+          console.log("🛡️ popupEl mousedown — 지도 이벤트 차단");
+          e.stopPropagation();
+        });
+        popupEl.addEventListener("touchstart", (e) => {
+          console.log("🛡️ popupEl touchstart — 지도 이벤트 차단");
+          e.stopPropagation();
+        });
+        popupEl.addEventListener("click", (e) => {
+          console.log("🛡️ popupEl click — 지도 이벤트 차단");
+          e.stopPropagation();
+        });
+
         const title = document.createElement("b");
         title.textContent = list[0].address;
         popupEl.appendChild(title);
         popupEl.appendChild(document.createElement("br"));
         popupEl.appendChild(document.createElement("br"));
 
-        // ✅ 계기번호 중복 강조
-        const suffixes = list.map((x) => x.meter_id.slice(-2));
         list.forEach((g) => {
           const div = document.createElement("div");
-          const suf = g.meter_id.slice(-2);
-          div.innerHTML = `계기번호: <span style="color:${
-            suffixes.filter((x) => x === suf).length > 1 ? "red" : "black"
-          }">${g.meter_id}</span>`;
+          div.textContent = `계기번호: ${g.meter_id}`;
           popupEl.appendChild(div);
         });
 
         popupEl.appendChild(document.createElement("hr"));
-        ["완료", "불가", "미방문"].forEach((text) => {
+
+        const btns = ["완료", "불가", "미방문"];
+        btns.forEach((text) => {
           const btn = document.createElement("button");
           btn.textContent = text;
           btn.style.marginRight = "5px";
-          btn.onclick = async (e) => {
+          btn.addEventListener("mousedown", (e) => {
+            console.log(`🛡️ 버튼 mousedown 차단: ${text}`);
             e.stopPropagation();
+          });
+          btn.addEventListener("click", async (e) => {
+            e.stopPropagation();
+            console.log(`🔘 ${text} 버튼 클릭됨 → ${list[0].address}`);
             await updateStatus(list.map((g) => g.meter_id), text);
-          };
+          });
           popupEl.appendChild(btn);
         });
-
-        // ✅ "가기" 버튼 유지
-        const goBtn = document.createElement("button");
-        goBtn.textContent = "가기";
-        goBtn.onclick = () => {
-          const lat = coords.lat;
-          const lng = coords.lng;
-          window.open(`https://map.kakao.com/link/to/${list[0].address},${lat},${lng}`);
-        };
-        popupEl.appendChild(goBtn);
 
         const popupOverlay = new window.kakao.maps.CustomOverlay({
           position: kakaoCoord,
@@ -211,24 +230,34 @@ function App() {
         });
         popupOverlay.setMap(map);
         activeOverlay = popupOverlay;
-      };
+        console.log("🧩 팝업 표시 완료:", list[0].address);
+      });
     });
 
-    window.kakao.maps.event.addListener(map, "click", () => {
-      if (activeOverlay) activeOverlay.setMap(null);
+    // 🗺️ 지도 클릭 → 팝업 닫기
+    window.kakao.maps.event.addListener(map, "click", (mouseEvent) => {
+      console.log("🧩 지도 클릭 발생 — 팝업 닫기 시도");
+      if (activeOverlay) {
+        activeOverlay.setMap(null);
+        console.log("🧩 지도 클릭 — 팝업 닫기 실행");
+      }
     });
   };
 
   const updateStatus = async (meterIds, newStatus) => {
+    console.log("🛠️ 상태 업데이트:", meterIds, "→", newStatus);
     const updated = data.map((d) =>
       meterIds.includes(d.meter_id) ? { ...d, status: newStatus } : d
     );
     setData(updated);
+
     const payload = updated.filter((d) => meterIds.includes(d.meter_id));
     const { error } = await supabase.from("meters").upsert(payload, {
       onConflict: ["meter_id", "address"],
     });
+
     if (error) console.error("❌ Supabase 저장 실패:", error.message);
+    else console.log("✅ Supabase 저장 완료");
   };
 
   if (!loggedIn)
@@ -266,34 +295,8 @@ function App() {
         }}
       >
         ✅ 완료: {counts["완료"] || 0} | ❌ 불가: {counts["불가"] || 0} | 🟦 미방문:{" "}
-        {counts["미방문"] || 0} {isAdmin && <span style={{ color: "orange" }}>🧭 관리자</span>}
+        {counts["미방문"] || 0}
       </div>
-
-      {/* ✅ 스카이뷰 버튼 복원 */}
-      <button
-        onClick={() => {
-          if (!map) return;
-          const newType = isSkyView
-            ? window.kakao.maps.MapTypeId.ROADMAP
-            : window.kakao.maps.MapTypeId.HYBRID;
-          map.setMapTypeId(newType);
-          setIsSkyView(!isSkyView);
-        }}
-        style={{
-          position: "absolute",
-          bottom: 20,
-          left: 10,
-          zIndex: 99999,
-          padding: "6px 10px",
-          borderRadius: "6px",
-          background: "white",
-          border: "1px solid #ccc",
-          cursor: "pointer",
-        }}
-      >
-        {isSkyView ? "일반지도" : "스카이뷰"}
-      </button>
-
       <div id="map" style={{ width: "100%", height: "100vh" }}></div>
     </div>
   );
