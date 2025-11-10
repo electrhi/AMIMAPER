@@ -21,26 +21,18 @@ function App() {
   const geoCache = JSON.parse(localStorage.getItem("geoCache") || "{}");
   const activeOverlay = useRef(null);
   const markers = useRef([]);
-  const userMarker = useRef(null);
-  const otherUserMarkers = useRef([]);
 
-  // ✅ 로그인
   const handleLogin = async (e) => {
     e.preventDefault();
-    console.log("🔐 로그인 시도:", user);
-    const { data: users, error } = await supabase.from("users").select("*").eq("id", user);
-    if (error) return console.error("❌ Supabase 오류:", error.message);
+    const { data: users } = await supabase.from("users").select("*").eq("id", user);
     if (users?.length && users[0].password === password) {
-      console.log("✅ 로그인 성공:", users[0]);
       setCanViewOthers(!!users[0].can_view_others);
       await loadData(users[0].data_file);
       setLoggedIn(true);
     } else alert("로그인 실패");
   };
 
-  // ✅ 엑셀 + DB 병합
   const loadData = async (fileName) => {
-    console.log("📂 엑셀 로드 시도:", fileName);
     const { data: excelBlob } = await supabase.storage.from("excels").download(fileName);
     const blob = await excelBlob.arrayBuffer();
     const workbook = XLSX.read(blob, { type: "array" });
@@ -60,11 +52,9 @@ function App() {
       return match ? { ...x, status: match.status, owner_id: match.owner_id } : x;
     });
 
-    console.log("✅ 데이터 병합 완료:", merged.length);
     setData(merged);
   };
 
-  // ✅ 주소 → 좌표 변환
   const geocodeAddress = (geocoder, address) =>
     new Promise((resolve) => {
       if (geoCache[address]) return resolve(geoCache[address]);
@@ -75,22 +65,16 @@ function App() {
           geoCache[address] = { lat, lng };
           localStorage.setItem("geoCache", JSON.stringify(geoCache));
           resolve({ lat, lng });
-        } else {
-          console.warn(`⚠️ 지오코딩 실패: ${address}`);
-          resolve(null);
-        }
+        } else resolve(null);
       });
     });
 
-  // ✅ 지도 초기화
   useEffect(() => {
     if (!loggedIn) return;
-    console.log("🗺️ Kakao SDK 로드 시작...");
     const script = document.createElement("script");
     script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${KAKAO_KEY}&autoload=false&libraries=services`;
     script.onload = () => {
       window.kakao.maps.load(() => {
-        console.log("✅ Kakao 지도 로드 완료");
         const mapInstance = new window.kakao.maps.Map(document.getElementById("map"), {
           center: new window.kakao.maps.LatLng(36.35, 127.38),
           level: 5,
@@ -111,54 +95,14 @@ function App() {
         if (navigator.geolocation) {
           navigator.geolocation.getCurrentPosition((pos) => {
             const loc = new window.kakao.maps.LatLng(pos.coords.latitude, pos.coords.longitude);
-            showMyLocationMarker(pos.coords.latitude, pos.coords.longitude, mapInstance);
             mapInstance.setCenter(loc);
           });
         }
-
-        if (canViewOthers) loadOtherUserLocations(mapInstance);
       });
     };
     document.head.appendChild(script);
   }, [loggedIn]);
 
-  // ✅ 내 위치 마커
-  const showMyLocationMarker = (lat, lng, mapInstance) => {
-    const content = document.createElement("div");
-    content.innerHTML = `<div style="background:#3182f6;color:white;border-radius:15px;padding:3px 8px;font-size:13px;font-weight:bold;">📍 ${user}</div>`;
-    const position = new window.kakao.maps.LatLng(lat, lng);
-    if (!userMarker.current) {
-      userMarker.current = new window.kakao.maps.CustomOverlay({
-        position,
-        content,
-        yAnchor: 1.3,
-      });
-      userMarker.current.setMap(mapInstance);
-    } else userMarker.current.setPosition(position);
-  };
-
-  // ✅ 다른 유저 위치 표시
-  const loadOtherUserLocations = async (mapInstance) => {
-    const { data: locs } = await supabase.from("user_locations").select("*");
-    otherUserMarkers.current.forEach((m) => m.setMap(null));
-    otherUserMarkers.current = [];
-
-    locs
-      .filter((l) => l.user_id !== user)
-      .forEach((l) => {
-        const content = document.createElement("div");
-        content.innerHTML = `<div style="background:#FFB100;color:white;border-radius:15px;padding:3px 8px;font-size:13px;font-weight:bold;">📍 ${l.user_id}</div>`;
-        const marker = new window.kakao.maps.CustomOverlay({
-          position: new window.kakao.maps.LatLng(l.lat, l.lng),
-          content,
-          yAnchor: 1.3,
-        });
-        marker.setMap(mapInstance);
-        otherUserMarkers.current.push(marker);
-      });
-  };
-
-  // ✅ 마커 렌더링
   useEffect(() => {
     if (!map || !data.length) return;
     renderMarkers();
@@ -219,17 +163,32 @@ function App() {
     });
   };
 
-  // ✅ 팝업 표시
   const openPopup = (list, kakaoCoord) => {
     if (activeOverlay.current) activeOverlay.current.setMap(null);
 
     const popupEl = document.createElement("div");
     popupEl.style.cssText =
-      "background:white;padding:10px;border:1px solid #ccc;border-radius:8px;max-width:220px;";
-    popupEl.innerHTML = `<b>${list[0].address}</b><br/>${list
-      .map((g) => `계기번호: ${g.meter_id}`)
-      .join("<br/>")}<hr/>`;
+      "background:white;padding:10px;border:1px solid #ccc;border-radius:8px;max-width:230px;";
+    popupEl.innerHTML = `<b>${list[0].address}</b><br/>`;
 
+    // ✅ 계기번호 중복 처리
+    const suffixSet = new Set();
+    list.forEach((g) => suffixSet.add(g.meter_id.slice(-2)));
+    const duplicates = [...suffixSet].filter(
+      (s) => list.filter((g) => g.meter_id.slice(-2) === s).length > 1
+    );
+
+    list.forEach((g) => {
+      const suffix = g.meter_id.slice(-2);
+      const color = duplicates.includes(suffix) ? "red" : "black";
+      const div = document.createElement("div");
+      div.innerHTML = `계기번호: <span style="color:${color}">${g.meter_id}</span>`;
+      popupEl.appendChild(div);
+    });
+
+    popupEl.appendChild(document.createElement("hr"));
+
+    // ✅ 상태 버튼
     ["완료", "불가", "미방문"].forEach((text) => {
       const btn = document.createElement("button");
       btn.textContent = text;
@@ -241,6 +200,30 @@ function App() {
       popupEl.appendChild(btn);
     });
 
+    // ✅ “가기” 버튼 (카카오내비)
+    const naviBtn = document.createElement("button");
+    naviBtn.textContent = "🧭 가기";
+    naviBtn.style.marginTop = "8px";
+    naviBtn.onclick = () => {
+      const lat = kakaoCoord.getLat();
+      const lng = kakaoCoord.getLng();
+      if (window.Kakao && window.Kakao.Navi) {
+        window.Kakao.init(KAKAO_KEY);
+        window.Kakao.Navi.start({
+          name: list[0].address,
+          x: lng,
+          y: lat,
+          coordType: "wgs84",
+        });
+      } else {
+        window.open(
+          `https://map.kakao.com/link/to/${encodeURIComponent(list[0].address)},${lat},${lng}`
+        );
+      }
+    };
+    popupEl.appendChild(naviBtn);
+
+    // ✅ 관리자 표시
     if (canViewOthers && list[0].owner_id) {
       popupEl.innerHTML += `<hr/>📌 담당자: ${list[0].owner_id}<br/>🕒 ${new Date().toLocaleString()}`;
     }
@@ -255,7 +238,6 @@ function App() {
     activeOverlay.current = popupOverlay;
   };
 
-  // ✅ 상태 업데이트
   const updateStatus = async (meterIds, newStatus) => {
     const updated = data.map((d) =>
       meterIds.includes(d.meter_id)
@@ -264,9 +246,9 @@ function App() {
     );
     setData(updated);
     await supabase.from("meters").upsert(updated, { onConflict: ["meter_id", "address"] });
+    renderMarkers(); // ✅ 즉시 지도 갱신
   };
 
-  // ✅ 지도 타입 전환
   const toggleMapType = () => {
     if (!map) return;
     const nextType = mapType === "ROADMAP" ? "SKYVIEW" : "ROADMAP";
@@ -279,7 +261,6 @@ function App() {
     );
   };
 
-  // ✅ UI
   if (!loggedIn)
     return (
       <div style={{ textAlign: "center", marginTop: "100px" }}>
