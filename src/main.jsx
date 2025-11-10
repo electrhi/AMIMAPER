@@ -281,6 +281,33 @@ const renderMarkers = async () => {
         overlay.setMap(map);
         markers.push(overlay);
 
+/** ✅ 계기타입 매핑 **/
+const meter_mapping = {
+  "17": "E-Type",
+  "18": "E-Type",
+  "19": "Adv-E",
+  "25": "G-Type",
+  "26": "G-Type",
+  "27": "G-Type",
+  "45": "G-Type",
+  "46": "G-Type",
+  "47": "G-Type",
+  "01": "표준형",
+  "03": "표준형",
+  "14": "표준형",
+  "15": "표준형",
+  "34": "표준형",
+  "35": "표준형",
+  "51": "AMIGO",
+  "52": "AMIGO",
+  "53": "AMIGO",
+  "54": "AMIGO",
+  "55": "AMIGO",
+  "56": "AMIGO",
+  "57": "AMIGO",
+};
+
+        
 /** 📌 마커 클릭 **/
 const openPopup = async (e) => {
   e.stopPropagation();
@@ -317,7 +344,21 @@ const openPopup = async (e) => {
   const duplicates = last2.filter((x, i) => last2.indexOf(x) !== i);
   list.forEach((g) => {
     const div = document.createElement("div");
-    div.textContent = g.meter_id;
+    list.forEach((g) => {
+  const div = document.createElement("div");
+
+  // ✅ 계기번호에서 3~4번째 자리 추출
+  const mid = g.meter_id?.substring(2, 4) || "";
+  const type = meter_mapping[mid] || "확인필요";
+
+  div.textContent = `${g.meter_id} | ${type}`;
+
+  // ✅ 중복 계기번호는 빨간색
+  if (duplicates.includes(g.meter_id.slice(-2))) div.style.color = "red";
+
+  popupEl.appendChild(div);
+});
+
     if (duplicates.includes(g.meter_id.slice(-2))) div.style.color = "red";
     popupEl.appendChild(div);
   });
