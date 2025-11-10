@@ -151,7 +151,7 @@ function App() {
     }
   }, [map, currentUser]);
 
-  /** 지도 타입 전환 (스카이뷰/일반지도) **/
+  /** 지도 타입 전환 **/
   const toggleMapType = () => {
     if (!map) return;
     const newType = mapType === "ROADMAP" ? "HYBRID" : "ROADMAP";
@@ -164,7 +164,7 @@ function App() {
     setMapType(newType);
   };
 
-  /** 주소 → 좌표 변환 (캐시 포함) **/
+  /** 주소 → 좌표 변환 **/
   const geocodeAddress = (geocoder, address) =>
     new Promise((resolve) => {
       if (geoCache[address]) {
@@ -264,9 +264,15 @@ function App() {
             box-shadow:0 2px 8px rgba(0,0,0,0.2);
           `;
 
-          popupEl.addEventListener("click", (e) => e.stopPropagation());
-          popupEl.addEventListener("touchstart", (e) => e.stopPropagation());
-
+          // ✅ 지도 이벤트 방지
+          popupEl.addEventListener("click", (e) => {
+            e.stopPropagation();
+            window.kakao.maps.event.preventMap();
+          });
+          popupEl.addEventListener("touchstart", (e) => {
+            e.stopPropagation();
+            window.kakao.maps.event.preventMap();
+          });
 
           const title = document.createElement("b");
           title.textContent = list[0].address;
@@ -291,7 +297,8 @@ function App() {
             btn.textContent = text;
             btn.style.margin = "4px";
             btn.addEventListener("click", async (e) => {
-              e.stopPropagation(); // 버튼 클릭만 이벤트 차단
+              e.stopPropagation();
+              window.kakao.maps.event.preventMap(); // ✅ 지도 클릭 이벤트 완전 차단
               if (text === "가기") {
                 const url = `https://map.kakao.com/link/to/${encodeURIComponent(
                   list[0].address
@@ -301,7 +308,6 @@ function App() {
                 console.log(`[DEBUG][STATUS] ${text} 클릭됨`);
                 await updateStatus(list.map((g) => g.meter_id), text, coords);
 
-                // ✅ 팝업 닫기
                 if (activeOverlay) {
                   activeOverlay.setMap(null);
                   activeOverlay = null;
@@ -312,11 +318,10 @@ function App() {
             popupEl.appendChild(btn);
           });
 
-          // ✅ 팝업 위치를 마커 아래쪽으로 이동
           const popupOverlay = new window.kakao.maps.CustomOverlay({
             position: kakaoCoord,
             content: popupEl,
-            yAnchor: -0.3, // 🔽 아래로 이동
+            yAnchor: -0.3,
             zIndex: 10000,
           });
           popupOverlay.setMap(map);
@@ -328,7 +333,6 @@ function App() {
         markerEl.addEventListener("touchstart", openPopup);
       });
 
-      // ✅ 지도 클릭 시 팝업 닫기
       window.kakao.maps.event.addListener(map, "click", () => {
         if (activeOverlay) {
           activeOverlay.setMap(null);
