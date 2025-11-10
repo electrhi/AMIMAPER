@@ -330,39 +330,47 @@ function App() {
   };
 
   /** 상태 업데이트 **/
-  const updateStatus = async (meterIds, newStatus, coords) => {
-    try {
-      console.log("[DEBUG][STATUS] 🛠️ 상태 업데이트 시도:", meterIds, "→", newStatus);
-      const updated = data.map((d) =>
-        meterIds.includes(d.meter_id) ? { ...d, status: newStatus } : d
-      );
-      setData(updated);
+const updateStatus = async (meterIds, newStatus, coords) => {
+  try {
+    console.log("[DEBUG][STATUS] 🛠️ 상태 업데이트 시도:", meterIds, "→", newStatus);
 
-      const payload = updated
-        .filter((d) => meterIds.includes(d.meter_id))
-        .map((d) => ({
-          meter_id: d.meter_id,
-          address: d.address,
-          status: newStatus,
-          user_id: currentUser.id,
-          lat: parseFloat(coords.lat),
-          lng: parseFloat(coords.lng),
-        })); // ✅ updated_at 제거됨
+    // 1️⃣ 변경된 데이터 준비
+    const payload = meterIds.map((id) => ({
+      meter_id: id,
+      address: data.find((d) => d.meter_id === id)?.address || "",
+      status: newStatus,
+      user_id: currentUser.id,
+      lat: parseFloat(coords.lat),
+      lng: parseFloat(coords.lng),
+    }));
 
-      const { error } = await supabase.from("meters").upsert(payload, {
-        onConflict: ["meter_id", "address"],
-      });
+    // 2️⃣ Supabase에 저장
+    const { error: upsertError } = await supabase.from("meters").upsert(payload, {
+      onConflict: ["meter_id", "address"],
+    });
+    if (upsertError) throw upsertError;
+    console.log("[DEBUG][STATUS] ✅ Supabase 업데이트 완료:", payload);
 
-      if (error) throw error;
-      console.log("[DEBUG][STATUS] ✅ Supabase 업데이트 완료:", payload);
+    // 3️⃣ Supabase에서 최신 데이터 다시 불러오기
+    console.log("[DEBUG][SYNC] 🔄 Supabase 최신 데이터 불러오기 시작...");
+    const { data: freshData, error: fetchError } = await supabase
+      .from("meters")
+      .select("*");
+    if (fetchError) throw fetchError;
 
-      await renderMarkers();
-      if (currentUser.can_view_others) await loadOtherUserLocations();
-      console.log("[DEBUG][STATUS] 🔁 전체 지도 최신화 완료");
-    } catch (e) {
-      console.error("[ERROR][STATUS] 저장 실패:", e.message);
-    }
-  };
+    console.log("[DEBUG][SYNC] ✅ 최신 데이터 동기화 완료");
+
+    // 4️⃣ state 갱신 후 지도 다시 렌더링
+    setData(freshData);
+    await renderMarkers();
+
+    if (currentUser.can_view_others) await loadOtherUserLocations();
+    console.log("[DEBUG][STATUS] 🔁 전체 지도 최신화 완료");
+  } catch (e) {
+    console.error("[ERROR][STATUS] 저장 실패:", e.message);
+  }
+};
+
 
   /** 관리자 모드 **/
   const loadOtherUserLocations = async () => {
