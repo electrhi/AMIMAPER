@@ -192,6 +192,7 @@ function App() {
     console.log("[DEBUG][MAP] 🧭 지도 렌더링 시작...");
     renderMarkers();
   }, [map, data]);
+
   /** 마커 렌더링 **/
   const renderMarkers = async () => {
     try {
@@ -248,141 +249,138 @@ function App() {
         markers.push(overlay);
 
         /** 📌 마커 클릭 **/
-const openPopup = (e) => {
-  e.stopPropagation();
-  if (activeOverlay) activeOverlay.setMap(null);
-  console.log(`[DEBUG][MAP] 🖱️ 마커 클릭됨: ${list[0].address}`);
+        const openPopup = (e) => {
+          e.stopPropagation();
+          if (activeOverlay) activeOverlay.setMap(null);
+          console.log(`[DEBUG][MAP] 🖱️ 마커 클릭됨: ${list[0].address}`);
 
-  const popupEl = document.createElement("div");
-  popupEl.style.cssText = `
-    background:white;
-    padding:10px;
-    border:1px solid #ccc;
-    border-radius:8px;
-    width:230px;
-    box-shadow:0 2px 8px rgba(0,0,0,0.2);
-  `;
+          const popupEl = document.createElement("div");
+          popupEl.style.cssText = `
+            background:white;
+            padding:10px;
+            border:1px solid #ccc;
+            border-radius:8px;
+            width:230px;
+            box-shadow:0 2px 8px rgba(0,0,0,0.2);
+          `;
 
-  // 내부 클릭이 지도 이벤트 막지 않도록 stopPropagation 제거
-  // 버튼 클릭 시에만 따로 막음
+          const title = document.createElement("b");
+          title.textContent = list[0].address;
+          popupEl.appendChild(title);
+          popupEl.appendChild(document.createElement("br"));
+          popupEl.appendChild(document.createElement("br"));
 
-  const title = document.createElement("b");
-  title.textContent = list[0].address;
-  popupEl.appendChild(title);
-  popupEl.appendChild(document.createElement("br"));
-  popupEl.appendChild(document.createElement("br"));
+          const last2 = list.map((g) => g.meter_id.slice(-2));
+          const duplicates = last2.filter((x, i) => last2.indexOf(x) !== i);
+          list.forEach((g) => {
+            const div = document.createElement("div");
+            div.textContent = g.meter_id;
+            if (duplicates.includes(g.meter_id.slice(-2))) div.style.color = "red";
+            popupEl.appendChild(div);
+          });
 
-  const last2 = list.map((g) => g.meter_id.slice(-2));
-  const duplicates = last2.filter((x, i) => last2.indexOf(x) !== i);
-  list.forEach((g) => {
-    const div = document.createElement("div");
-    div.textContent = g.meter_id;
-    if (duplicates.includes(g.meter_id.slice(-2))) div.style.color = "red";
-    popupEl.appendChild(div);
-  });
+          popupEl.appendChild(document.createElement("hr"));
 
-  popupEl.appendChild(document.createElement("hr"));
+          const buttons = ["완료", "불가", "미방문", "가기"];
+          buttons.forEach((text) => {
+            const btn = document.createElement("button");
+            btn.textContent = text;
+            btn.style.margin = "4px";
+            btn.addEventListener("click", async (e) => {
+              e.stopPropagation(); // 버튼 클릭만 이벤트 차단
+              if (text === "가기") {
+                const url = `https://map.kakao.com/link/to/${encodeURIComponent(
+                  list[0].address
+                )},${coords.lat},${coords.lng}`;
+                window.open(url, "_blank");
+              } else {
+                console.log(`[DEBUG][STATUS] ${text} 클릭됨`);
+                await updateStatus(list.map((g) => g.meter_id), text, coords);
 
-  const buttons = ["완료", "불가", "미방문", "가기"];
-  buttons.forEach((text) => {
-    const btn = document.createElement("button");
-    btn.textContent = text;
-    btn.style.margin = "4px";
-    btn.addEventListener("click", async (e) => {
-      e.stopPropagation(); // 버튼 클릭만 이벤트 차단
-      if (text === "가기") {
-        const url = `https://map.kakao.com/link/to/${encodeURIComponent(
-          list[0].address
-        )},${coords.lat},${coords.lng}`;
-        window.open(url, "_blank");
-      } else {
-        console.log(`[DEBUG][STATUS] ${text} 클릭됨`);
-        await updateStatus(list.map((g) => g.meter_id), text, coords);
+                // ✅ 팝업 닫기
+                if (activeOverlay) {
+                  activeOverlay.setMap(null);
+                  activeOverlay = null;
+                  console.log("[DEBUG][POPUP] ✅ 팝업 닫힘 (버튼 클릭 후)");
+                }
+              }
+            });
+            popupEl.appendChild(btn);
+          });
 
-        // ✅ 팝업 닫기
+          // ✅ 팝업 위치를 마커 아래쪽으로 이동
+          const popupOverlay = new window.kakao.maps.CustomOverlay({
+            position: kakaoCoord,
+            content: popupEl,
+            yAnchor: -0.3, // 🔽 아래로 이동
+            zIndex: 10000,
+          });
+          popupOverlay.setMap(map);
+          activeOverlay = popupOverlay;
+          console.log("[DEBUG][MAP] 🧩 팝업 표시 완료:", list[0].address);
+        };
+
+        markerEl.addEventListener("click", openPopup);
+        markerEl.addEventListener("touchstart", openPopup);
+      });
+
+      // ✅ 지도 클릭 시 팝업 닫기
+      window.kakao.maps.event.addListener(map, "click", () => {
         if (activeOverlay) {
           activeOverlay.setMap(null);
           activeOverlay = null;
-          console.log("[DEBUG][POPUP] ✅ 버튼 클릭 후 팝업 닫힘");
+          console.log("[DEBUG][MAP] 🧩 지도 클릭 — 팝업 닫기");
         }
-      }
-    });
-    popupEl.appendChild(btn);
-  });
-
-  // ✅ 팝업 위치를 마커 아래쪽으로 이동
-  const popupOverlay = new window.kakao.maps.CustomOverlay({
-    position: kakaoCoord,
-    content: popupEl,
-    yAnchor: -0.3, // 아래쪽으로 이동
-    zIndex: 10000,
-  });
-  popupOverlay.setMap(map);
-  activeOverlay = popupOverlay;
-  console.log("[DEBUG][MAP] 🧩 팝업 표시 완료:", list[0].address);
-};
-
-// ✅ 지도 클릭 시 팝업 닫기
-window.kakao.maps.event.addListener(map, "click", () => {
-  if (activeOverlay) {
-    activeOverlay.setMap(null);
-    activeOverlay = null;
-    console.log("[DEBUG][MAP] 🧩 지도 클릭 — 팝업 닫기");
-  }
-});
-
-
- /** 상태 업데이트 **/
-const updateStatus = async (meterIds, newStatus, coords) => {
-  try {
-    console.log("[DEBUG][STATUS] 🛠️ 상태 업데이트 시도:", meterIds, "→", newStatus);
-
-    // 1️⃣ 변경된 데이터 준비
-    const payload = meterIds.map((id) => ({
-      meter_id: id,
-      address: data.find((d) => d.meter_id === id)?.address || "",
-      status: newStatus,
-      user_id: currentUser.id,
-      lat: parseFloat(coords.lat),
-      lng: parseFloat(coords.lng),
-    }));
-
-    // 2️⃣ Supabase에 저장
-    const { error: upsertError } = await supabase.from("meters").upsert(payload, {
-      onConflict: ["meter_id", "address"],
-    });
-    if (upsertError) throw upsertError;
-    console.log("[DEBUG][STATUS] ✅ Supabase 업데이트 완료:", payload);
-
-    // 3️⃣ Supabase에서 최신 데이터 다시 불러오기
-    console.log("[DEBUG][SYNC] 🔄 Supabase 최신 데이터 불러오기 시작...");
-    const { data: freshData, error: fetchError } = await supabase
-      .from("meters")
-      .select("*");
-    if (fetchError) throw fetchError;
-
-    console.log("[DEBUG][SYNC] ✅ 최신 데이터 동기화 완료");
-
-    // 4️⃣ state 갱신 후 지도 다시 렌더링
-    setData(freshData);
-    await renderMarkers();
-
-    // 5️⃣ 관리자 모드일 경우 다른 위치 표시
-    if (currentUser.can_view_others) await loadOtherUserLocations();
-
-    // ✅ 6️⃣ 팝업 닫기
-    if (activeOverlay) {
-      activeOverlay.setMap(null);
-      activeOverlay = null;
-      console.log("[DEBUG][POPUP] ✅ 팝업 닫힘 (버튼 클릭 후)");
+      });
+    } catch (e) {
+      console.error("[ERROR][MAP] 마커 렌더링 실패:", e);
     }
+  };
 
-    console.log("[DEBUG][STATUS] 🔁 전체 지도 최신화 완료");
-  } catch (e) {
-    console.error("[ERROR][STATUS] 저장 실패:", e.message);
-  }
-};
+  /** 상태 업데이트 **/
+  const updateStatus = async (meterIds, newStatus, coords) => {
+    try {
+      console.log("[DEBUG][STATUS] 🛠️ 상태 업데이트 시도:", meterIds, "→", newStatus);
 
+      const payload = meterIds.map((id) => ({
+        meter_id: id,
+        address: data.find((d) => d.meter_id === id)?.address || "",
+        status: newStatus,
+        user_id: currentUser.id,
+        lat: parseFloat(coords.lat),
+        lng: parseFloat(coords.lng),
+      }));
+
+      const { error: upsertError } = await supabase.from("meters").upsert(payload, {
+        onConflict: ["meter_id", "address"],
+      });
+      if (upsertError) throw upsertError;
+      console.log("[DEBUG][STATUS] ✅ Supabase 업데이트 완료:", payload);
+
+      console.log("[DEBUG][SYNC] 🔄 Supabase 최신 데이터 불러오기 시작...");
+      const { data: freshData, error: fetchError } = await supabase
+        .from("meters")
+        .select("*");
+      if (fetchError) throw fetchError;
+
+      console.log("[DEBUG][SYNC] ✅ 최신 데이터 동기화 완료");
+
+      setData(freshData);
+      await renderMarkers();
+
+      if (currentUser.can_view_others) await loadOtherUserLocations();
+
+      if (activeOverlay) {
+        activeOverlay.setMap(null);
+        activeOverlay = null;
+        console.log("[DEBUG][POPUP] ✅ 팝업 닫힘 (버튼 클릭 후)");
+      }
+
+      console.log("[DEBUG][STATUS] 🔁 전체 지도 최신화 완료");
+    } catch (e) {
+      console.error("[ERROR][STATUS] 저장 실패:", e.message);
+    }
+  };
 
   /** 관리자 모드 **/
   const loadOtherUserLocations = async () => {
@@ -453,7 +451,7 @@ const updateStatus = async (meterIds, newStatus, coords) => {
     <div style={{ width: "100%", height: "100vh", position: "relative" }}>
       <div
         style={{
-          position: "fixed", // ✅ 모바일에서도 표시되도록 수정
+          position: "fixed",
           top: 10,
           left: 10,
           background: "white",
@@ -471,7 +469,7 @@ const updateStatus = async (meterIds, newStatus, coords) => {
       <button
         onClick={toggleMapType}
         style={{
-          position: "fixed", // ✅ 고정
+          position: "fixed",
           bottom: 20,
           left: 20,
           zIndex: 999999,
@@ -490,7 +488,7 @@ const updateStatus = async (meterIds, newStatus, coords) => {
         currentUser?.can_view_others === "y") && (
         <div
           style={{
-            position: "fixed", // ✅ 관리자 표시도 고정
+            position: "fixed",
             bottom: 20,
             right: 20,
             zIndex: 999999,
