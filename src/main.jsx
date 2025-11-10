@@ -107,6 +107,7 @@ function App() {
     };
     document.head.appendChild(script);
   }, [loggedIn]);
+
   /** 내 위치 마커 표시 **/
   useEffect(() => {
     if (!map || !currentUser) return;
@@ -328,10 +329,18 @@ function App() {
       console.error("[ERROR][MAP] 마커 렌더링 실패:", e);
     }
   };
-  /** 상태 업데이트 **/
+
+  /** ✅ 상태 업데이트 (수정됨) **/
   const updateStatus = async (meterIds, newStatus, coords) => {
     try {
       console.log("[DEBUG][STATUS] 🛠️ 상태 업데이트 시도:", meterIds, "→", newStatus);
+
+      // 최신 데이터 반영
+      console.log("[DEBUG][SYNC] 🔄 Supabase 최신 데이터 불러오기 시작...");
+      await loadData(currentUser.data_file);
+      console.log("[DEBUG][SYNC] ✅ 최신 데이터 동기화 완료");
+
+      // 현재 상태 적용
       const updated = data.map((d) =>
         meterIds.includes(d.meter_id) ? { ...d, status: newStatus } : d
       );
@@ -356,6 +365,7 @@ function App() {
       if (error) throw error;
       console.log("[DEBUG][STATUS] ✅ Supabase 업데이트 완료:", payload);
 
+      // 지도 리렌더링
       await renderMarkers();
       if (currentUser.can_view_others) await loadOtherUserLocations();
       console.log("[DEBUG][STATUS] 🔁 전체 지도 최신화 완료");
