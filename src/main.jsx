@@ -329,7 +329,7 @@ function App() {
     }
   };
 
-  /** 상태 업데이트 **/
+ /** 상태 업데이트 **/
 const updateStatus = async (meterIds, newStatus, coords) => {
   try {
     console.log("[DEBUG][STATUS] 🛠️ 상태 업데이트 시도:", meterIds, "→", newStatus);
@@ -364,7 +364,16 @@ const updateStatus = async (meterIds, newStatus, coords) => {
     setData(freshData);
     await renderMarkers();
 
+    // 5️⃣ 관리자 모드일 경우 다른 위치 표시
     if (currentUser.can_view_others) await loadOtherUserLocations();
+
+    // ✅ 6️⃣ 팝업 닫기
+    if (activeOverlay) {
+      activeOverlay.setMap(null);
+      activeOverlay = null;
+      console.log("[DEBUG][POPUP] ✅ 팝업 닫힘 (버튼 클릭 후)");
+    }
+
     console.log("[DEBUG][STATUS] 🔁 전체 지도 최신화 완료");
   } catch (e) {
     console.error("[ERROR][STATUS] 저장 실패:", e.message);
