@@ -264,6 +264,10 @@ function App() {
             box-shadow:0 2px 8px rgba(0,0,0,0.2);
           `;
 
+          popupEl.addEventListener("click", (e) => e.stopPropagation());
+          popupEl.addEventListener("touchstart", (e) => e.stopPropagation());
+
+
           const title = document.createElement("b");
           title.textContent = list[0].address;
           popupEl.appendChild(title);
