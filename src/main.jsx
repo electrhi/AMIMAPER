@@ -248,86 +248,89 @@ function App() {
         markers.push(overlay);
 
         /** 📌 마커 클릭 **/
-        const openPopup = (e) => {
-          e.stopPropagation();
-          if (activeOverlay) activeOverlay.setMap(null);
-          console.log(`[DEBUG][MAP] 🖱️ 마커 클릭됨: ${list[0].address}`);
-          const popupEl = document.createElement("div");
-          popupEl.style.cssText = `
-            background:white;
-            padding:10px;
-            border:1px solid #ccc;
-            border-radius:8px;
-            width:230px;
-            box-shadow:0 2px 8px rgba(0,0,0,0.2);
-          `;
+const openPopup = (e) => {
+  e.stopPropagation();
+  if (activeOverlay) activeOverlay.setMap(null);
+  console.log(`[DEBUG][MAP] 🖱️ 마커 클릭됨: ${list[0].address}`);
 
-          ["mousedown", "click", "touchstart"].forEach((ev) =>
-            popupEl.addEventListener(ev, (e) => e.stopPropagation())
-          );
+  const popupEl = document.createElement("div");
+  popupEl.style.cssText = `
+    background:white;
+    padding:10px;
+    border:1px solid #ccc;
+    border-radius:8px;
+    width:230px;
+    box-shadow:0 2px 8px rgba(0,0,0,0.2);
+  `;
 
-          const title = document.createElement("b");
-          title.textContent = list[0].address;
-          popupEl.appendChild(title);
-          popupEl.appendChild(document.createElement("br"));
-          popupEl.appendChild(document.createElement("br"));
+  // 내부 클릭이 지도 이벤트 막지 않도록 stopPropagation 제거
+  // 버튼 클릭 시에만 따로 막음
 
-          const last2 = list.map((g) => g.meter_id.slice(-2));
-          const duplicates = last2.filter((x, i) => last2.indexOf(x) !== i);
-          list.forEach((g) => {
-            const div = document.createElement("div");
-            div.textContent = g.meter_id;
-            if (duplicates.includes(g.meter_id.slice(-2))) div.style.color = "red";
-            popupEl.appendChild(div);
-          });
+  const title = document.createElement("b");
+  title.textContent = list[0].address;
+  popupEl.appendChild(title);
+  popupEl.appendChild(document.createElement("br"));
+  popupEl.appendChild(document.createElement("br"));
 
-          popupEl.appendChild(document.createElement("hr"));
+  const last2 = list.map((g) => g.meter_id.slice(-2));
+  const duplicates = last2.filter((x, i) => last2.indexOf(x) !== i);
+  list.forEach((g) => {
+    const div = document.createElement("div");
+    div.textContent = g.meter_id;
+    if (duplicates.includes(g.meter_id.slice(-2))) div.style.color = "red";
+    popupEl.appendChild(div);
+  });
 
-          const buttons = ["완료", "불가", "미방문", "가기"];
-          buttons.forEach((text) => {
-            const btn = document.createElement("button");
-            btn.textContent = text;
-            btn.style.margin = "4px";
-            btn.addEventListener("click", async (e) => {
-              e.stopPropagation();
-              if (text === "가기") {
-                const url = `https://map.kakao.com/link/to/${encodeURIComponent(
-                  list[0].address
-                )},${coords.lat},${coords.lng}`;
-                window.open(url, "_blank");
-              } else {
-                console.log(`[DEBUG][STATUS] ${text} 클릭됨`);
-                await updateStatus(list.map((g) => g.meter_id), text, coords);
-              }
-            });
-            popupEl.appendChild(btn);
-          });
+  popupEl.appendChild(document.createElement("hr"));
 
-          const popupOverlay = new window.kakao.maps.CustomOverlay({
-            position: kakaoCoord,
-            content: popupEl,
-            yAnchor: 1.5,
-            zIndex: 10000,
-          });
-          popupOverlay.setMap(map);
-          activeOverlay = popupOverlay;
-          console.log("[DEBUG][MAP] 🧩 팝업 표시 완료:", list[0].address);
-        };
+  const buttons = ["완료", "불가", "미방문", "가기"];
+  buttons.forEach((text) => {
+    const btn = document.createElement("button");
+    btn.textContent = text;
+    btn.style.margin = "4px";
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation(); // 버튼 클릭만 이벤트 차단
+      if (text === "가기") {
+        const url = `https://map.kakao.com/link/to/${encodeURIComponent(
+          list[0].address
+        )},${coords.lat},${coords.lng}`;
+        window.open(url, "_blank");
+      } else {
+        console.log(`[DEBUG][STATUS] ${text} 클릭됨`);
+        await updateStatus(list.map((g) => g.meter_id), text, coords);
 
-        markerEl.addEventListener("click", openPopup);
-        markerEl.addEventListener("touchstart", openPopup);
-      });
-
-      window.kakao.maps.event.addListener(map, "click", () => {
+        // ✅ 팝업 닫기
         if (activeOverlay) {
           activeOverlay.setMap(null);
-          console.log("[DEBUG][MAP] 🧩 지도 클릭 — 팝업 닫기");
+          activeOverlay = null;
+          console.log("[DEBUG][POPUP] ✅ 버튼 클릭 후 팝업 닫힘");
         }
-      });
-    } catch (e) {
-      console.error("[ERROR][MAP] 마커 렌더링 실패:", e);
-    }
-  };
+      }
+    });
+    popupEl.appendChild(btn);
+  });
+
+  // ✅ 팝업 위치를 마커 아래쪽으로 이동
+  const popupOverlay = new window.kakao.maps.CustomOverlay({
+    position: kakaoCoord,
+    content: popupEl,
+    yAnchor: -0.3, // 아래쪽으로 이동
+    zIndex: 10000,
+  });
+  popupOverlay.setMap(map);
+  activeOverlay = popupOverlay;
+  console.log("[DEBUG][MAP] 🧩 팝업 표시 완료:", list[0].address);
+};
+
+// ✅ 지도 클릭 시 팝업 닫기
+window.kakao.maps.event.addListener(map, "click", () => {
+  if (activeOverlay) {
+    activeOverlay.setMap(null);
+    activeOverlay = null;
+    console.log("[DEBUG][MAP] 🧩 지도 클릭 — 팝업 닫기");
+  }
+});
+
 
  /** 상태 업데이트 **/
 const updateStatus = async (meterIds, newStatus, coords) => {
