@@ -493,7 +493,7 @@ const loadOtherUserLocations = async () => {
     const overlay = new window.kakao.maps.CustomOverlay({
       position: coord,
       content: markerEl,
-      yAnchor: 2,
+      yAnchor: 3,
     });
     overlay.setMap(map);
     otherUserOverlays.current.push(overlay); // ✅ 변경
