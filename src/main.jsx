@@ -55,40 +55,57 @@ function App() {
     }
   };
 
-  /** Excel 데이터 로드 **/
-  const loadData = async (fileName) => {
-    try {
-      console.log("[DEBUG][DATA] 📂 엑셀 로드 시작:", fileName);
-      const { data: excelBlob, error } = await supabase.storage
-        .from("excels")
-        .download(fileName);
-      if (error) throw error;
+/** Excel 데이터 로드 **/
+const loadData = async (fileName) => {
+  try {
+    console.log("[DEBUG][DATA] 📂 엑셀 로드 시작:", fileName);
+    const { data: excelBlob, error } = await supabase.storage
+      .from("excels")
+      .download(fileName);
+    if (error) throw error;
 
-      const blob = await excelBlob.arrayBuffer();
-      const workbook = XLSX.read(blob, { type: "array" });
-      const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      const json = XLSX.utils.sheet_to_json(sheet);
-      console.log("[DEBUG][DATA] 📊 엑셀 데이터:", json.length, "행");
+    const blob = await excelBlob.arrayBuffer();
+    const workbook = XLSX.read(blob, { type: "array" });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const json = XLSX.utils.sheet_to_json(sheet);
+    console.log("[DEBUG][DATA] 📊 엑셀 데이터:", json.length, "행");
 
-      const baseData = json.map((r) => ({
-        meter_id: r["계기번호"],
-        address: r["주소"],
-        status: r["진행"] || "미방문",
-      }));
+    const baseData = json.map((r) => ({
+      meter_id: r["계기번호"],
+      address: r["주소"],
+      status: r["진행"] || "미방문",
+    }));
 
-      const { data: dbData } = await supabase.from("meters").select("*");
-      const merged = baseData.map((x) => {
-        const m = dbData?.find(
-          (d) => d.meter_id === x.meter_id && d.address === x.address
-        );
-        return m ? { ...x, status: m.status } : x;
-      });
-      setData(merged);
-      console.log("[DEBUG][DATA] ✅ 병합 완료:", merged.length);
-    } catch (e) {
-      console.error("[ERROR][DATA] 엑셀 로드 실패:", e.message);
-    }
-  };
+    // ✅ 수정 시작: 최신 데이터만 유지
+    const { data: dbData } = await supabase
+      .from("meters")
+      .select("*")
+      .order("updated_at", { ascending: false });
+
+    const latestMap = {};
+    dbData?.forEach((d) => {
+      if (!latestMap[d.meter_id]) latestMap[d.meter_id] = d;
+    });
+    const latestData = Object.values(latestMap);
+
+    const merged = baseData.map((x) => {
+      const m = latestData.find(
+        (d) => d.meter_id === x.meter_id && d.address === x.address
+      );
+      return m ? { ...x, status: m.status } : x;
+    });
+    // ✅ 수정 끝
+
+    setData(merged);
+    console.log("[DEBUG][DATA] ✅ 병합 완료:", merged.length);
+
+    // ✅ 추가: 로그인 시 자동 지도 렌더링
+    setTimeout(() => renderMarkers(), 400);
+  } catch (e) {
+    console.error("[ERROR][DATA] 엑셀 로드 실패:", e.message);
+  }
+};
+
 
   /** Kakao 지도 초기화 **/
   useEffect(() => {
@@ -197,30 +214,38 @@ function App() {
     renderMarkers();
   }, [map, data]);
 
-  /** 마커 렌더링 **/
-  const renderMarkers = async () => {
-    try {
-      console.log("[DEBUG][MAP] 🧹 기존 마커 초기화:", markers.length);
-      markers.forEach((m) => m.setMap(null));
-      markers = [];
-      activeOverlay = null;
+/** 마커 렌더링 **/
+const renderMarkers = async () => {
+  try {
+    console.log("[DEBUG][MAP] 🧹 기존 마커 초기화:", markers.length);
+    markers.forEach((m) => m.setMap(null));
+    markers = [];
+    activeOverlay = null;
 
-      const geocoder = new window.kakao.maps.services.Geocoder();
-      const grouped = {};
-      const statusCount = { 완료: 0, 불가: 0, 미방문: 0 };
+    const geocoder = new window.kakao.maps.services.Geocoder();
+    const grouped = {};
+    const statusCount = { 완료: 0, 불가: 0, 미방문: 0 };
 
-      data.forEach((d) => (statusCount[d.status] = (statusCount[d.status] || 0) + 1));
-      setCounts(statusCount);
-      console.log("[DEBUG][MAP] 🔄 상태 카운트:", statusCount);
+    // ✅ 추가: meter_id별 최신 1개만 표시
+    const latestPerMeter = {};
+    data.forEach((d) => {
+      statusCount[d.status] = (statusCount[d.status] || 0) + 1;
+      if (!latestPerMeter[d.meter_id]) latestPerMeter[d.meter_id] = d;
+    });
+    const filteredData = Object.values(latestPerMeter);
+    setCounts(statusCount);
+    console.log("[DEBUG][MAP] 🔄 상태 카운트:", statusCount);
 
-      for (const row of data) {
-        const coords = await geocodeAddress(geocoder, row.address);
-        if (!coords) continue;
+    // ✅ 기존 for (const row of data) → 변경
+    for (const row of filteredData) {
+      const coords = await geocodeAddress(geocoder, row.address);
+      if (!coords) continue;
 
-        const key = `${coords.lat},${coords.lng}`;
-        if (!grouped[key]) grouped[key] = { coords, list: [] };
-        grouped[key].list.push(row);
-      }
+      const key = `${coords.lat},${coords.lng}`;
+      if (!grouped[key]) grouped[key] = { coords, list: [] };
+      grouped[key].list.push(row);
+    }
+
 
       Object.keys(grouped).forEach((key) => {
         const { coords, list } = grouped[key];
@@ -384,47 +409,50 @@ function App() {
     }
   };
 
-  /** 관리자 모드 **/
-  const loadOtherUserLocations = async () => {
-    if (!map) return;
-    const { data: logs, error } = await supabase
-      .from("meters")
-      .select("address, lat, lng, status, user_id, updated_at")
-      .not("user_id", "is", null)
-      .order("updated_at", { ascending: false });
+/** 관리자 모드 **/
+const loadOtherUserLocations = async () => {
+  if (!map) return;
+  const { data: logs, error } = await supabase
+    .from("meters")
+    .select("address, lat, lng, status, user_id, updated_at")
+    .not("user_id", "is", null)
+    .order("updated_at", { ascending: false });
 
-    if (error) throw error;
+  if (error) throw error;
 
-    const latest = {};
-    logs.forEach((l) => {
-      if (!l.user_id || !l.lat || !l.lng) return;
-      if (!latest[l.user_id]) latest[l.user_id] = l;
+  const latest = {};
+  logs.forEach((l) => {
+    if (!l.user_id || !l.lat || !l.lng) return;
+    if (!latest[l.user_id]) latest[l.user_id] = l;
+  });
+
+  Object.keys(latest).forEach((uid) => {
+    const loc = latest[uid];
+    const coord = new window.kakao.maps.LatLng(loc.lat, loc.lng);
+
+    const markerEl = document.createElement("div");
+    markerEl.style.cssText = `
+      background:purple;
+      border-radius:8px;
+      padding:4px 7px;
+      color:white;
+      font-weight:bold;
+      font-size:11px;
+      box-shadow:0 0 6px rgba(0,0,0,0.4);
+      text-shadow: 0 0 3px black;
+    `;
+    markerEl.textContent = uid;
+
+    // ✅ 변경: 관리자 마커를 일반 마커 아래쪽으로 이동
+    const overlay = new window.kakao.maps.CustomOverlay({
+      position: coord,
+      content: markerEl,
+      yAnchor: 1.6, // 기존 1.2 → 1.6
     });
+    overlay.setMap(map);
+  });
+};
 
-    Object.keys(latest).forEach((uid) => {
-      const loc = latest[uid];
-      const coord = new window.kakao.maps.LatLng(loc.lat, loc.lng);
-
-      const markerEl = document.createElement("div");
-      markerEl.style.cssText = `
-        background:purple;
-        border-radius:8px;
-        padding:4px 7px;
-        color:white;
-        font-weight:bold;
-        font-size:11px;
-        box-shadow:0 0 6px rgba(0,0,0,0.4);
-      `;
-      markerEl.textContent = uid;
-
-      const overlay = new window.kakao.maps.CustomOverlay({
-        position: coord,
-        content: markerEl,
-        yAnchor: 1.2,
-      });
-      overlay.setMap(map);
-    });
-  };
 
   /** 로그인 UI **/
   if (!loggedIn)
