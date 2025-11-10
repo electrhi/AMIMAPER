@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import ReactDOM from "react-dom/client";
 import { createClient } from "@supabase/supabase-js";
 import * as XLSX from "xlsx";
@@ -7,6 +7,8 @@ const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_KEY;
 const KAKAO_KEY = import.meta.env.VITE_KAKAO_JAVASCRIPT_KEY;
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+const otherUserOverlays = useRef([]); // ✅ 기존 let otherUserOverlays = [] 대신
+
 
 function App() {
   const [user, setUser] = useState("");
@@ -452,9 +454,9 @@ let otherUserOverlays = []; // ✅ 추가: 전역 배열로 다른 유저 마커
 const loadOtherUserLocations = async () => {
   if (!map) return;
 
-  // ✅ 추가: 기존 관리자 마커 제거
-  otherUserOverlays.forEach((ov) => ov.setMap(null));
-  otherUserOverlays = [];
+  // ✅ 기존 관리자 마커 제거
+  otherUserOverlays.current.forEach((ov) => ov.setMap(null));
+  otherUserOverlays.current = [];
 
   const { data: logs, error } = await supabase
     .from("meters")
@@ -490,10 +492,10 @@ const loadOtherUserLocations = async () => {
     const overlay = new window.kakao.maps.CustomOverlay({
       position: coord,
       content: markerEl,
-      yAnchor: -1.6,
+      yAnchor: 1.6,
     });
     overlay.setMap(map);
-    otherUserOverlays.push(overlay); // ✅ 추가
+    otherUserOverlays.current.push(overlay); // ✅ 변경
   });
 };
 
