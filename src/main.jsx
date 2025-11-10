@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { createClient } from "@supabase/supabase-js";
 import * as XLSX from "xlsx";
@@ -15,102 +15,99 @@ function App() {
   const [data, setData] = useState([]);
   const [map, setMap] = useState(null);
   const [counts, setCounts] = useState({ 완료: 0, 불가: 0, 미방문: 0 });
-  const [canViewOthers, setCanViewOthers] = useState(false);
-  const [mapType, setMapType] = useState(localStorage.getItem("mapType") || "ROADMAP");
 
+  let activeOverlay = null;
+  let markers = [];
   const geoCache = JSON.parse(localStorage.getItem("geoCache") || "{}");
-  const activeOverlay = useRef(null);
-  const markers = useRef([]);
 
   const handleLogin = async (e) => {
     e.preventDefault();
-    const { data: users } = await supabase.from("users").select("*").eq("id", user);
-    if (users?.length && users[0].password === password) {
-      setCanViewOthers(!!users[0].can_view_others);
+    console.log("🔐 로그인 시도:", user);
+    const { data: users, error } = await supabase.from("users").select("*").eq("id", user);
+    if (error) return console.error("❌ Supabase 오류:", error.message);
+
+    if (users && users.length > 0 && users[0].password === password) {
+      console.log("✅ 로그인 성공:", users[0]);
       await loadData(users[0].data_file);
       setLoggedIn(true);
-    } else alert("로그인 실패");
+    } else {
+      alert("로그인 실패");
+    }
   };
 
   const loadData = async (fileName) => {
-    const { data: excelBlob } = await supabase.storage.from("excels").download(fileName);
+    console.log("📂 엑셀 로드 시도:", fileName);
+    const { data: excelBlob, error } = await supabase.storage.from("excels").download(fileName);
+    if (error) return console.error("❌ 엑셀 로드 실패:", error.message);
     const blob = await excelBlob.arrayBuffer();
     const workbook = XLSX.read(blob, { type: "array" });
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     const json = XLSX.utils.sheet_to_json(sheet);
+    console.log("📊 엑셀 데이터:", json.length, "행");
 
     const baseData = json.map((r) => ({
       meter_id: r["계기번호"],
       address: r["주소"],
       status: r["진행"] || "미방문",
-      owner_id: user,
     }));
 
     const { data: dbData } = await supabase.from("meters").select("*");
     const merged = baseData.map((x) => {
-      const match = dbData?.find((d) => d.meter_id === x.meter_id && d.address === x.address);
-      return match ? { ...x, status: match.status, owner_id: match.owner_id } : x;
+      const m = dbData?.find((d) => d.meter_id === x.meter_id && d.address === x.address);
+      return m ? { ...x, status: m.status } : x;
     });
 
+    console.log("✅ 병합 완료:", merged.length);
     setData(merged);
   };
 
-  const geocodeAddress = (geocoder, address) =>
-    new Promise((resolve) => {
-      if (geoCache[address]) return resolve(geoCache[address]);
-      geocoder.addressSearch(address, (result, status) => {
-        if (status === window.kakao.maps.services.Status.OK) {
-          const lat = parseFloat(result[0].y);
-          const lng = parseFloat(result[0].x);
-          geoCache[address] = { lat, lng };
-          localStorage.setItem("geoCache", JSON.stringify(geoCache));
-          resolve({ lat, lng });
-        } else resolve(null);
-      });
-    });
-
   useEffect(() => {
     if (!loggedIn) return;
+    console.log("🗺️ Kakao 지도 스크립트 로드 중...");
     const script = document.createElement("script");
     script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${KAKAO_KEY}&autoload=false&libraries=services`;
     script.onload = () => {
       window.kakao.maps.load(() => {
         const mapInstance = new window.kakao.maps.Map(document.getElementById("map"), {
-          center: new window.kakao.maps.LatLng(36.35, 127.38),
+          center: new window.kakao.maps.LatLng(37.5665, 126.9780),
           level: 5,
-          mapTypeId:
-            mapType === "SKYVIEW"
-              ? window.kakao.maps.MapTypeId.HYBRID
-              : window.kakao.maps.MapTypeId.ROADMAP,
         });
+        console.log("✅ 지도 초기화 완료");
         setMap(mapInstance);
-
-        window.kakao.maps.event.addListener(mapInstance, "click", () => {
-          if (activeOverlay.current) {
-            activeOverlay.current.setMap(null);
-            activeOverlay.current = null;
-          }
-        });
-
-        if (navigator.geolocation) {
-          navigator.geolocation.getCurrentPosition((pos) => {
-            const loc = new window.kakao.maps.LatLng(pos.coords.latitude, pos.coords.longitude);
-            mapInstance.setCenter(loc);
-          });
-        }
       });
     };
     document.head.appendChild(script);
   }, [loggedIn]);
 
+  const geocodeAddress = (geocoder, address) =>
+    new Promise((resolve) => {
+      if (geoCache[address]) {
+        console.log(`💾 캐시 HIT: ${address}`);
+        return resolve(geoCache[address]);
+      }
+      geocoder.addressSearch(address, (result, status) => {
+        if (status === window.kakao.maps.services.Status.OK) {
+          const lat = parseFloat(result[0].y).toFixed(6);
+          const lng = parseFloat(result[0].x).toFixed(6);
+          geoCache[address] = { lat, lng };
+          localStorage.setItem("geoCache", JSON.stringify(geoCache));
+          console.log(`🌐 Geocode 성공: ${address} → (${lat}, ${lng})`);
+          resolve({ lat, lng });
+        } else {
+          console.warn(`⚠️ 지오코딩 실패: ${address} → ${status}`);
+          resolve(null);
+        }
+      });
+    });
+
   useEffect(() => {
-    if (!map || !data.length) return;
+    if (!map || data.length === 0) return;
     renderMarkers();
   }, [map, data]);
 
   const renderMarkers = async () => {
-    markers.current.forEach((m) => m.setMap(null));
-    markers.current = [];
+    markers.forEach((m) => m.setMap(null));
+    markers = [];
 
     const geocoder = new window.kakao.maps.services.Geocoder();
     const grouped = {};
@@ -154,111 +151,104 @@ function App() {
         yAnchor: 1,
       });
       overlay.setMap(map);
-      markers.current.push(overlay);
+      markers.push(overlay);
 
       markerEl.addEventListener("click", (e) => {
         e.stopPropagation();
-        openPopup(list, kakaoCoord);
+        console.log("🖱️ 마커 클릭됨:", list[0].address);
+
+        if (activeOverlay) activeOverlay.setMap(null);
+
+        const popupEl = document.createElement("div");
+        popupEl.style.cssText = `
+          background:white;
+          padding:10px;
+          border:1px solid #ccc;
+          border-radius:8px;
+        `;
+
+        const title = document.createElement("b");
+        title.textContent = list[0].address;
+        popupEl.appendChild(title);
+        popupEl.appendChild(document.createElement("br"));
+        popupEl.appendChild(document.createElement("br"));
+
+        list.forEach((g) => {
+          const div = document.createElement("div");
+          div.textContent = `계기번호: ${g.meter_id}`;
+          popupEl.appendChild(div);
+        });
+
+        popupEl.appendChild(document.createElement("hr"));
+
+        // ✅ 버튼 섹션
+        const btns = ["완료", "불가", "미방문"];
+        btns.forEach((text) => {
+          const btn = document.createElement("button");
+          btn.textContent = text;
+          btn.style.marginRight = "5px";
+          btn.onclick = async (e) => {
+            e.stopPropagation();
+            console.log(`🔘 ${text} 버튼 클릭됨`);
+            await updateStatus(list.map((g) => g.meter_id), text);
+          };
+          popupEl.appendChild(btn);
+        });
+
+        // ✅ "가기" 버튼 추가 (모든 유저)
+        const goBtn = document.createElement("button");
+        goBtn.textContent = "가기";
+        goBtn.style.marginTop = "8px";
+        goBtn.onclick = () => {
+          const lat = coords.lat;
+          const lng = coords.lng;
+          if (window.Kakao && window.Kakao.Navi) {
+            try {
+              window.Kakao.init(KAKAO_KEY);
+              window.Kakao.Navi.start({
+                name: list[0].address,
+                x: lng,
+                y: lat,
+                coordType: "wgs84",
+              });
+            } catch {
+              window.open(`https://map.kakao.com/link/to/${list[0].address},${lat},${lng}`);
+            }
+          } else {
+            window.open(`https://map.kakao.com/link/to/${list[0].address},${lat},${lng}`);
+          }
+        };
+        popupEl.appendChild(goBtn);
+
+        const popupOverlay = new window.kakao.maps.CustomOverlay({
+          position: kakaoCoord,
+          content: popupEl,
+          yAnchor: 1.5,
+          zIndex: 10000,
+        });
+        popupOverlay.setMap(map);
+        activeOverlay = popupOverlay;
       });
     });
-  };
 
-  const openPopup = (list, kakaoCoord) => {
-    if (activeOverlay.current) activeOverlay.current.setMap(null);
-
-    const popupEl = document.createElement("div");
-    popupEl.style.cssText =
-      "background:white;padding:10px;border:1px solid #ccc;border-radius:8px;max-width:230px;";
-    popupEl.innerHTML = `<b>${list[0].address}</b><br/>`;
-
-    // ✅ 계기번호 중복 처리
-    const suffixSet = new Set();
-    list.forEach((g) => suffixSet.add(g.meter_id.slice(-2)));
-    const duplicates = [...suffixSet].filter(
-      (s) => list.filter((g) => g.meter_id.slice(-2) === s).length > 1
-    );
-
-    list.forEach((g) => {
-      const suffix = g.meter_id.slice(-2);
-      const color = duplicates.includes(suffix) ? "red" : "black";
-      const div = document.createElement("div");
-      div.innerHTML = `계기번호: <span style="color:${color}">${g.meter_id}</span>`;
-      popupEl.appendChild(div);
+    // 지도 클릭 → 팝업 닫기
+    window.kakao.maps.event.addListener(map, "click", () => {
+      if (activeOverlay) activeOverlay.setMap(null);
     });
-
-    popupEl.appendChild(document.createElement("hr"));
-
-    // ✅ 상태 버튼
-    ["완료", "불가", "미방문"].forEach((text) => {
-      const btn = document.createElement("button");
-      btn.textContent = text;
-      btn.style.marginRight = "5px";
-      btn.onclick = async (e) => {
-        e.stopPropagation();
-        await updateStatus(list.map((g) => g.meter_id), text);
-      };
-      popupEl.appendChild(btn);
-    });
-
-    // ✅ “가기” 버튼 (카카오내비)
-    const naviBtn = document.createElement("button");
-    naviBtn.textContent = "🧭 가기";
-    naviBtn.style.marginTop = "8px";
-    naviBtn.onclick = () => {
-      const lat = kakaoCoord.getLat();
-      const lng = kakaoCoord.getLng();
-      if (window.Kakao && window.Kakao.Navi) {
-        window.Kakao.init(KAKAO_KEY);
-        window.Kakao.Navi.start({
-          name: list[0].address,
-          x: lng,
-          y: lat,
-          coordType: "wgs84",
-        });
-      } else {
-        window.open(
-          `https://map.kakao.com/link/to/${encodeURIComponent(list[0].address)},${lat},${lng}`
-        );
-      }
-    };
-    popupEl.appendChild(naviBtn);
-
-    // ✅ 관리자 표시
-    if (canViewOthers && list[0].owner_id) {
-      popupEl.innerHTML += `<hr/>📌 담당자: ${list[0].owner_id}<br/>🕒 ${new Date().toLocaleString()}`;
-    }
-
-    const popupOverlay = new window.kakao.maps.CustomOverlay({
-      position: kakaoCoord,
-      content: popupEl,
-      yAnchor: 1.5,
-      zIndex: 10000,
-    });
-    popupOverlay.setMap(map);
-    activeOverlay.current = popupOverlay;
   };
 
   const updateStatus = async (meterIds, newStatus) => {
+    console.log("🛠️ 상태 업데이트:", meterIds, "→", newStatus);
     const updated = data.map((d) =>
-      meterIds.includes(d.meter_id)
-        ? { ...d, status: newStatus, owner_id: user }
-        : d
+      meterIds.includes(d.meter_id) ? { ...d, status: newStatus } : d
     );
     setData(updated);
-    await supabase.from("meters").upsert(updated, { onConflict: ["meter_id", "address"] });
-    renderMarkers(); // ✅ 즉시 지도 갱신
-  };
-
-  const toggleMapType = () => {
-    if (!map) return;
-    const nextType = mapType === "ROADMAP" ? "SKYVIEW" : "ROADMAP";
-    setMapType(nextType);
-    localStorage.setItem("mapType", nextType);
-    map.setMapTypeId(
-      nextType === "SKYVIEW"
-        ? window.kakao.maps.MapTypeId.HYBRID
-        : window.kakao.maps.MapTypeId.ROADMAP
-    );
+    const payload = updated.filter((d) => meterIds.includes(d.meter_id));
+    const { error } = await supabase.from("meters").upsert(payload, {
+      onConflict: ["meter_id", "address"],
+    });
+    if (error) console.error("❌ Supabase 저장 실패:", error.message);
+    else console.log("✅ Supabase 저장 완료");
   };
 
   if (!loggedIn)
@@ -297,29 +287,7 @@ function App() {
       >
         ✅ 완료: {counts["완료"] || 0} | ❌ 불가: {counts["불가"] || 0} | 🟦 미방문:{" "}
         {counts["미방문"] || 0}
-        {canViewOthers && (
-          <span style={{ marginLeft: "10px", color: "#ff7f00" }}>🧭 관리자모드</span>
-        )}
       </div>
-
-      <div
-        style={{
-          position: "absolute",
-          bottom: 15,
-          left: 15,
-          background: "white",
-          padding: "6px 10px",
-          borderRadius: "8px",
-          boxShadow: "0 2px 5px rgba(0,0,0,0.2)",
-          cursor: "pointer",
-          zIndex: 99999,
-          fontWeight: "bold",
-        }}
-        onClick={toggleMapType}
-      >
-        {mapType === "ROADMAP" ? "🛰️ 스카이뷰" : "🗺️ 일반지도"}
-      </div>
-
       <div id="map" style={{ width: "100%", height: "100vh" }}></div>
     </div>
   );
