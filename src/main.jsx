@@ -192,7 +192,6 @@ function App() {
     console.log("[DEBUG][MAP] 🧭 지도 렌더링 시작...");
     renderMarkers();
   }, [map, data]);
-
   /** 마커 렌더링 **/
   const renderMarkers = async () => {
     try {
@@ -248,7 +247,7 @@ function App() {
         overlay.setMap(map);
         markers.push(overlay);
 
-        /** 📌 마커 클릭 (모바일 + PC) **/
+        /** 📌 마커 클릭 **/
         const openPopup = (e) => {
           e.stopPropagation();
           if (activeOverlay) activeOverlay.setMap(null);
@@ -330,17 +329,10 @@ function App() {
     }
   };
 
-  /** ✅ 상태 업데이트 (수정됨) **/
+  /** 상태 업데이트 **/
   const updateStatus = async (meterIds, newStatus, coords) => {
     try {
       console.log("[DEBUG][STATUS] 🛠️ 상태 업데이트 시도:", meterIds, "→", newStatus);
-
-      // 최신 데이터 반영
-      console.log("[DEBUG][SYNC] 🔄 Supabase 최신 데이터 불러오기 시작...");
-      await loadData(currentUser.data_file);
-      console.log("[DEBUG][SYNC] ✅ 최신 데이터 동기화 완료");
-
-      // 현재 상태 적용
       const updated = data.map((d) =>
         meterIds.includes(d.meter_id) ? { ...d, status: newStatus } : d
       );
@@ -355,8 +347,7 @@ function App() {
           user_id: currentUser.id,
           lat: parseFloat(coords.lat),
           lng: parseFloat(coords.lng),
-          updated_at: new Date().toISOString(),
-        }));
+        })); // ✅ updated_at 제거됨
 
       const { error } = await supabase.from("meters").upsert(payload, {
         onConflict: ["meter_id", "address"],
@@ -365,7 +356,6 @@ function App() {
       if (error) throw error;
       console.log("[DEBUG][STATUS] ✅ Supabase 업데이트 완료:", payload);
 
-      // 지도 리렌더링
       await renderMarkers();
       if (currentUser.can_view_others) await loadOtherUserLocations();
       console.log("[DEBUG][STATUS] 🔁 전체 지도 최신화 완료");
@@ -379,7 +369,7 @@ function App() {
     if (!map) return;
     const { data: logs, error } = await supabase
       .from("meters")
-      .select("address, lat, lng, status, user_id, updated_at")
+      .select("address, lat, lng, status, user_id")
       .not("user_id", "is", null);
     if (error) throw error;
 
@@ -443,14 +433,14 @@ function App() {
     <div style={{ width: "100%", height: "100vh", position: "relative" }}>
       <div
         style={{
-          position: "absolute",
+          position: "fixed", // ✅ 모바일에서도 표시되도록 수정
           top: 10,
           left: 10,
           background: "white",
           padding: "8px 12px",
           borderRadius: "8px",
           boxShadow: "0 2px 5px rgba(0,0,0,0.2)",
-          zIndex: 99999,
+          zIndex: 999999,
           fontWeight: "bold",
         }}
       >
@@ -461,10 +451,10 @@ function App() {
       <button
         onClick={toggleMapType}
         style={{
-          position: "absolute",
+          position: "fixed", // ✅ 고정
           bottom: 20,
           left: 20,
-          zIndex: 99999,
+          zIndex: 999999,
           padding: "10px 14px",
           borderRadius: "8px",
           border: "none",
@@ -480,10 +470,10 @@ function App() {
         currentUser?.can_view_others === "y") && (
         <div
           style={{
-            position: "absolute",
+            position: "fixed", // ✅ 관리자 표시도 고정
             bottom: 20,
             right: 20,
-            zIndex: 99999,
+            zIndex: 999999,
             background: "rgba(128,0,128,0.8)",
             color: "white",
             padding: "8px 12px",
