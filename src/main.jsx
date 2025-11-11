@@ -121,7 +121,7 @@ function App() {
     document.head.appendChild(script);
   }, [loggedIn]);
 
-  /** Supabase에서 geoCache 파일 로드 **/
+/** Supabase에서 geoCache 파일 로드 **/
 useEffect(() => {
   if (!loggedIn || !currentUser) return;
 
@@ -163,6 +163,8 @@ useEffect(() => {
       }
 
       setGeoCache(parsed);
+
+      // ✅ 캐시 로드 후 마커 렌더링
       setTimeout(() => renderMarkers(), 800);
     } catch (err) {
       console.error("[ERROR][CACHE] 캐시 로드 실패:", err.message);
