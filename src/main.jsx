@@ -285,188 +285,215 @@ useEffect(() => {
     }
   };
 
-  /** 마커 렌더링 **/
-  const renderMarkers = async () => {
-    try {
-      if (!map || !data.length) return;
-      markers.forEach((m) => m.setMap(null));
-      markers = [];
+ /** 마커 렌더링 **/
+const renderMarkers = async () => {
+  try {
+    if (!map || !data.length) {
+      console.warn("[DEBUG][MAP] ❌ 지도나 데이터가 아직 준비되지 않음");
+      return;
+    }
 
-      const grouped = {};
-      const failedAddresses = [];
-      const statusCount = { 완료: 0, 불가: 0, 미방문: 0 };
+    console.log("[DEBUG][MAP] 🔄 마커 렌더링 시작...");
 
-      // ✅ 최신 데이터만 유지
-      const latestPerMeter = {};
-      data.forEach((d) => {
-        statusCount[d.status] = (statusCount[d.status] || 0) + 1;
-        if (!latestPerMeter[d.meter_id]) latestPerMeter[d.meter_id] = d;
-      });
-      const filteredData = Object.values(latestPerMeter);
-      setCounts(statusCount);
+    // ✅ 기존 마커 제거
+    markers.forEach((m) => m.setMap(null));
+    markers = [];
 
-      // ✅ 주소 그룹핑
-      const uniqueGroupSet = new Set();
-      for (const row of filteredData) {
-        const addrKey = row.address?.trim().replace(/\s+/g, " ");
-        const coords = await geocodeAddress(addrKey);
-        if (!coords) {
-          failedAddresses.push(addrKey);
-          continue;
+    const grouped = {};
+    const failedAddresses = [];
+    const statusCount = { 완료: 0, 불가: 0, 미방문: 0 };
+
+    // ✅ 최신 데이터만 유지
+    const latestPerMeter = {};
+    data.forEach((d) => {
+      statusCount[d.status] = (statusCount[d.status] || 0) + 1;
+      if (!latestPerMeter[d.meter_id]) latestPerMeter[d.meter_id] = d;
+    });
+    const filteredData = Object.values(latestPerMeter);
+    setCounts(statusCount);
+
+    console.log(
+      `[DEBUG][MAP] ✅ 데이터 정제 완료 — ${filteredData.length}건 처리 중...`
+    );
+
+    // ✅ 주소 그룹핑 + 캐시 좌표 매칭
+    const uniqueGroupSet = new Set();
+    for (const row of filteredData) {
+      if (!row.address) continue;
+
+      const cleanAddr = row.address.trim().replace(/\s+/g, " ");
+      let coords = geoCache[cleanAddr];
+
+      // 🔍 공백 제거 후 대체 매칭
+      if (!coords) {
+        const altKey = Object.keys(geoCache).find(
+          (k) => k.replace(/\s+/g, "") === cleanAddr.replace(/\s+/g, "")
+        );
+        if (altKey) {
+          coords = geoCache[altKey];
+          console.log(
+            `[DEBUG][GEO] ⚙️ 캐시 대체 매칭 성공: ${cleanAddr} → ${altKey}`
+          );
         }
-
-        const key = `${coords.lat},${coords.lng}`;
-        const uniqueKey = `${addrKey}_${row.meter_id}`;
-        if (uniqueGroupSet.has(uniqueKey)) continue;
-        uniqueGroupSet.add(uniqueKey);
-
-        if (!grouped[key]) grouped[key] = { coords, list: [] };
-        grouped[key].list.push(row);
       }
 
-      if (failedAddresses.length > 0)
-        console.warn(`[WARN][GEO] ❌ 좌표 실패 ${failedAddresses.length}건`, failedAddresses);
+      if (!coords) {
+        failedAddresses.push(cleanAddr);
+        continue;
+      }
 
-      // ✅ 계기타입 매핑표
-      const meter_mapping = {
-        "17": "E-Type",
-        "18": "E-Type",
-        "19": "Adv-E",
-        "25": "G-Type",
-        "26": "G-Type",
-        "27": "G-Type",
-        "45": "G-Type",
-        "46": "G-Type",
-        "47": "G-Type",
-        "01": "표준형",
-        "03": "표준형",
-        "14": "표준형",
-        "15": "표준형",
-        "34": "표준형",
-        "35": "표준형",
-        "51": "AMIGO",
-        "52": "AMIGO",
-        "53": "AMIGO",
-        "54": "AMIGO",
-        "55": "AMIGO",
-        "56": "AMIGO",
-        "57": "AMIGO",
+      const key = `${coords.lat},${coords.lng}`;
+      const uniqueKey = `${cleanAddr}_${row.meter_id}`;
+      if (uniqueGroupSet.has(uniqueKey)) continue;
+      uniqueGroupSet.add(uniqueKey);
+
+      if (!grouped[key]) grouped[key] = { coords, list: [] };
+      grouped[key].list.push(row);
+    }
+
+    // ⚠️ 실패 주소 통계
+    if (failedAddresses.length > 0) {
+      console.warn(
+        `[WARN][GEO] ❌ 좌표 실패 ${failedAddresses.length}건 / ${data.length}행`
+      );
+      console.log("[DEBUG][GEO] 🔍 실패 샘플:", failedAddresses.slice(0, 10));
+    }
+
+    // ✅ 계기타입 매핑표
+    const meter_mapping = {
+      "17": "E-Type",
+      "18": "E-Type",
+      "19": "Adv-E",
+      "25": "G-Type",
+      "26": "G-Type",
+      "27": "G-Type",
+      "45": "G-Type",
+      "46": "G-Type",
+      "47": "G-Type",
+      "01": "표준형",
+      "03": "표준형",
+      "14": "표준형",
+      "15": "표준형",
+      "34": "표준형",
+      "35": "표준형",
+      "51": "AMIGO",
+      "52": "AMIGO",
+      "53": "AMIGO",
+      "54": "AMIGO",
+      "55": "AMIGO",
+      "56": "AMIGO",
+      "57": "AMIGO",
+    };
+
+    // ✅ 마커 생성
+    let markerCount = 0;
+    Object.keys(grouped).forEach((key) => {
+      const { coords, list } = grouped[key];
+      const 진행 = list[0].status;
+      const color =
+        진행 === "완료" ? "green" : 진행 === "불가" ? "red" : "blue";
+
+      const kakaoCoord = new window.kakao.maps.LatLng(coords.lat, coords.lng);
+
+      const markerEl = document.createElement("div");
+      markerEl.style.cssText = `
+        background:${color};
+        border-radius:50%;
+        width:30px;height:30px;
+        color:white;font-size:12px;
+        line-height:30px;text-align:center;
+        box-shadow:0 0 5px rgba(0,0,0,0.4);
+        cursor:pointer;
+      `;
+      markerEl.textContent = list.length;
+
+      const overlay = new window.kakao.maps.CustomOverlay({
+        position: kakaoCoord,
+        content: markerEl,
+        yAnchor: 1,
+      });
+      overlay.setMap(map);
+      markers.push(overlay);
+      markerCount++;
+
+      // ✅ 클릭 팝업
+      const openPopup = async (e) => {
+        e.stopPropagation();
+        await fetchLatestStatus();
+        const old = getActiveOverlay();
+        if (old) old.setMap(null);
+
+        const popupEl = document.createElement("div");
+        popupEl.style.cssText = `
+          background:white;
+          padding:10px;
+          border:1px solid #ccc;
+          border-radius:8px;
+          width:230px;
+          box-shadow:0 2px 8px rgba(0,0,0,0.2);
+        `;
+
+        const title = document.createElement("b");
+        title.textContent = list[0].address;
+        popupEl.appendChild(title);
+        popupEl.appendChild(document.createElement("br"));
+        popupEl.appendChild(document.createElement("br"));
+
+        const allIds = list.map((g) => g.meter_id);
+        const duplicates = allIds.filter(
+          (id, i) => allIds.indexOf(id) !== i
+        );
+        const uniqueMeters = Array.from(new Set(allIds));
+
+        uniqueMeters.forEach((id) => {
+          const div = document.createElement("div");
+          const mid = id.substring(2, 4);
+          const type = meter_mapping[mid] || "확인필요";
+          div.textContent = `${id} | ${type}`;
+          if (duplicates.includes(id)) div.style.color = "red";
+          popupEl.appendChild(div);
+        });
+
+        popupEl.appendChild(document.createElement("hr"));
+
+        ["완료", "불가", "미방문", "가기"].forEach((text) => {
+          const btn = document.createElement("button");
+          btn.textContent = text;
+          btn.style.margin = "4px";
+          btn.addEventListener("click", async (e) => {
+            e.stopPropagation();
+            if (text === "가기") {
+              const url = `https://map.kakao.com/link/to/${encodeURIComponent(
+                list[0].address
+              )},${coords.lat},${coords.lng}`;
+              window.open(url, "_blank");
+            } else {
+              await updateStatus(list.map((g) => g.meter_id), text, coords);
+            }
+          });
+          popupEl.appendChild(btn);
+        });
+
+        const popupOverlay = new window.kakao.maps.CustomOverlay({
+          position: kakaoCoord,
+          content: popupEl,
+          yAnchor: 1.5,
+          zIndex: 10000,
+        });
+        popupOverlay.setMap(map);
+        setActiveOverlay(popupOverlay);
       };
 
-      Object.keys(grouped).forEach((key) => {
-        const { coords, list } = grouped[key];
-        const 진행 = list[0].status;
-        const color =
-          진행 === "완료" ? "green" : 진행 === "불가" ? "red" : "blue";
-        const kakaoCoord = new window.kakao.maps.LatLng(coords.lat, coords.lng);
+      markerEl.addEventListener("click", openPopup);
+      markerEl.addEventListener("touchstart", openPopup);
+    });
 
-        const markerEl = document.createElement("div");
-        markerEl.style.cssText = `
-          background:${color};
-          border-radius:50%;
-          width:30px;height:30px;
-          color:white;font-size:12px;
-          line-height:30px;text-align:center;
-          box-shadow:0 0 5px rgba(0,0,0,0.4);
-          cursor:pointer;
-        `;
-        markerEl.textContent = list.length;
+    console.log(`[DEBUG][MAP] ✅ 마커 ${markerCount}개 렌더링 완료`);
+  } catch (e) {
+    console.error("[ERROR][MAP] 마커 렌더링 실패:", e);
+  }
+};
 
-        const overlay = new window.kakao.maps.CustomOverlay({
-          position: kakaoCoord,
-          content: markerEl,
-          yAnchor: 1,
-        });
-        overlay.setMap(map);
-        markers.push(overlay);
-
-        /** 마커 클릭 **/
-        const openPopup = async (e) => {
-          e.stopPropagation();
-          await fetchLatestStatus();
-          const old = getActiveOverlay();
-          if (old) old.setMap(null);
-
-          const popupEl = document.createElement("div");
-          popupEl.style.cssText = `
-            background:white;
-            padding:10px;
-            border:1px solid #ccc;
-            border-radius:8px;
-            width:230px;
-            box-shadow:0 2px 8px rgba(0,0,0,0.2);
-          `;
-
-          const title = document.createElement("b");
-          title.textContent = list[0].address;
-          popupEl.appendChild(title);
-          popupEl.appendChild(document.createElement("br"));
-          popupEl.appendChild(document.createElement("br"));
-
-          // 중복 계기 감지
-          const allIds = list.map((g) => g.meter_id);
-          const duplicates = allIds.filter(
-            (id, i) => allIds.indexOf(id) !== i
-          );
-          const uniqueMeters = Array.from(new Set(allIds));
-
-          uniqueMeters.forEach((id) => {
-            const div = document.createElement("div");
-            const mid = id.substring(2, 4);
-            const type = meter_mapping[mid] || "확인필요";
-            div.textContent = `${id} | ${type}`;
-            if (duplicates.includes(id)) div.style.color = "red";
-            popupEl.appendChild(div);
-          });
-
-          popupEl.appendChild(document.createElement("hr"));
-
-          ["완료", "불가", "미방문", "가기"].forEach((text) => {
-            const btn = document.createElement("button");
-            btn.textContent = text;
-            btn.style.margin = "4px";
-            btn.addEventListener("click", async (e) => {
-              e.stopPropagation();
-              if (text === "가기") {
-                const url = `https://map.kakao.com/link/to/${encodeURIComponent(
-                  list[0].address
-                )},${coords.lat},${coords.lng}`;
-                window.open(url, "_blank");
-              } else {
-                await updateStatus(list.map((g) => g.meter_id), text, coords);
-              }
-            });
-            popupEl.appendChild(btn);
-          });
-
-          const popupOverlay = new window.kakao.maps.CustomOverlay({
-            position: kakaoCoord,
-            content: popupEl,
-            yAnchor: 1.5,
-            zIndex: 10000,
-          });
-          popupOverlay.setMap(map);
-          activeOverlay = popupOverlay;
-          setActiveOverlay(popupOverlay);
-        };
-
-        markerEl.addEventListener("click", openPopup);
-        markerEl.addEventListener("touchstart", openPopup);
-      });
-
-      if (map && window.kakao?.maps?.event) {
-        window.kakao.maps.event.addListener(map, "click", () => {
-          const overlay = getActiveOverlay();
-          if (overlay) {
-            overlay.setMap(null);
-            setActiveOverlay(null);
-          }
-        });
-      }
-    } catch (e) {
-      console.error("[ERROR][MAP] 마커 렌더링 실패:", e);
-    }
-  };
   /** 상태 업데이트 **/
   const updateStatus = async (meterIds, newStatus, coords) => {
     try {
