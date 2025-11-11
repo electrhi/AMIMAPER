@@ -285,6 +285,9 @@ useEffect(() => {
     }
   };
 
+
+  
+
  /** 마커 렌더링 **/
 const renderMarkers = async () => {
   try {
@@ -493,6 +496,26 @@ const renderMarkers = async () => {
     console.error("[ERROR][MAP] 마커 렌더링 실패:", e);
   }
 };
+
+  /** ✅ 마커 렌더링 자동 트리거 — map + data + geoCache 모두 준비된 뒤 실행 **/
+useEffect(() => {
+  if (!map) {
+    console.log("[DEBUG][MAP] ⏳ 지도 아직 로드 안됨");
+    return;
+  }
+  if (!data || data.length === 0) {
+    console.log("[DEBUG][MAP] ⏳ 데이터 아직 없음");
+    return;
+  }
+  if (!geoCache || Object.keys(geoCache).length === 0) {
+    console.log("[DEBUG][MAP] ⏳ 캐시 아직 없음");
+    return;
+  }
+
+  console.log("[DEBUG][MAP] ✅ 지도+데이터+캐시 준비 완료 → 마커 렌더링 실행");
+  renderMarkers();
+}, [map, data, geoCache]);
+
 
   /** 상태 업데이트 **/
   const updateStatus = async (meterIds, newStatus, coords) => {
@@ -704,26 +727,5 @@ const renderMarkers = async () => {
     </div>
   );
 }
-
-/** ✅ 마커 렌더링 자동 트리거 — map + data + geoCache 모두 준비된 뒤 실행 **/
-useEffect(() => {
-  if (!map) {
-    console.log("[DEBUG][MAP] ⏳ 지도 아직 로드 안됨");
-    return;
-  }
-  if (!data || data.length === 0) {
-    console.log("[DEBUG][MAP] ⏳ 데이터 아직 없음");
-    return;
-  }
-  if (!geoCache || Object.keys(geoCache).length === 0) {
-    console.log("[DEBUG][MAP] ⏳ 캐시 아직 없음");
-    return;
-  }
-
-  console.log("[DEBUG][MAP] ✅ 지도+데이터+캐시 준비 완료 → 마커 렌더링 실행");
-  renderMarkers();
-}, [map, data, geoCache]);
-
-
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);
