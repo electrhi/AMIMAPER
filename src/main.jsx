@@ -472,15 +472,21 @@ if (!map) {
 
       });
 
-      window.kakao.maps.event.addListener(map, "click", () => {
-        const overlay = getActiveOverlay(); // ✅ 추가
-        if (overlay) {
-          overlay.setMap(null);
-          setActiveOverlay(null);
-          activeOverlay = null;
-          console.log("[DEBUG][MAP] 🧩 지도 클릭 — 팝업 닫기 (최신 참조)");
-        }
-      });
+      // ✅ 지도 객체가 유효한지 검사 후 클릭 이벤트 등록
+if (map && window.kakao?.maps?.event) {
+  window.kakao.maps.event.addListener(map, "click", () => {
+    const overlay = getActiveOverlay();
+    if (overlay) {
+      overlay.setMap(null);
+      setActiveOverlay(null);
+      activeOverlay = null;
+      console.log("[DEBUG][MAP] 🧩 지도 클릭 — 팝업 닫기 (최신 참조)");
+    }
+  });
+} else {
+  console.warn("[WARN][MAP] ⚠️ 지도 객체가 아직 null이거나 kakao.maps.event가 로드되지 않음 — 클릭 이벤트 등록 건너뜀");
+}
+
     } catch (e) {
       console.error("[ERROR][MAP] 마커 렌더링 실패:", e);
     }
