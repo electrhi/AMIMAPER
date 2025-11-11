@@ -318,10 +318,11 @@ const renderMarkers = async () => {
 const uniqueGroupSet = new Set();
 
 for (const row of filteredData) {
-  // ✅ 캐시에 있으면 바로 사용
-const coords = geoCache[row.address];
+  // ✅ 앞뒤 공백 제거 후 캐시 조회
+const addrKey = row.address.trim().replace(/\s+/g, " ");
+const coords = geoCache[addrKey];
 if (!coords) {
-  console.warn(`[WARN][MAP] 좌표 없음 (캐시에 없음): ${row.address}`);
+  console.warn(`[WARN][MAP] 좌표 없음 (캐시에 없음): ${addrKey}`);
   return;
 }
 
