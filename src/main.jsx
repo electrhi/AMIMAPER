@@ -122,38 +122,56 @@ function App() {
   }, [loggedIn]);
 
   /** Supabase에서 geoCache 파일 로드 **/
-  useEffect(() => {
-    if (!loggedIn || !currentUser) return;
-    const loadGeoCache = async () => {
-      try {
-        console.log(`[DEBUG][CACHE] 📦 캐시 불러오기: ${GEO_CACHE_FILE}`);
-        const { data: cacheBlob, error } = await supabase.storage
-          .from("excels")
-          .download(GEO_CACHE_FILE);
-        if (error) {
-          console.warn("[DEBUG][CACHE] ❌ 캐시 없음 — 새로 생성 예정");
-          setGeoCache({});
-          return;
-        }
-        const text = await cacheBlob.text();
-        let parsed = JSON.parse(text);
+useEffect(() => {
+  if (!loggedIn || !currentUser) return;
 
-        // ✅ 혹시 루트에 파일명이 감싸고 있으면 풀어준다
-        if (
-          Object.keys(parsed).length === 1 &&
-          typeof parsed[Object.keys(parsed)[0]] === "object"
-          ) {
-          parsed = parsed[Object.keys(parsed)[0]];
-          console.log("[DEBUG][CACHE] ⚙️ 중첩된 JSON 구조 감지 — 자동 언랩 처리됨");
-          }
+  const loadGeoCache = async () => {
+    try {
+      console.log(`[DEBUG][CACHE] 📦 캐시 불러오기 시도: ${GEO_CACHE_FILE}`);
+      const { data: cacheBlob, error } = await supabase.storage
+        .from("excels")
+        .download(GEO_CACHE_FILE);
 
-        console.log(`[DEBUG][CACHE] ✅ ${Object.keys(parsed).length}개 캐시 로드`);
-        setGeoCache(parsed);
-
-      } catch (err) {
-        console.error("[ERROR][CACHE] 캐시 로드 실패:", err.message);
+      if (error) {
+        console.warn("[DEBUG][CACHE] ❌ 캐시 없음 — 새로 생성 예정");
+        setGeoCache({});
+        return;
       }
-    };
+
+      // ✅ ArrayBuffer로 안전하게 읽기 (대용량 대응)
+      const arrayBuffer = await cacheBlob.arrayBuffer();
+      const decoder = new TextDecoder("utf-8");
+      const text = decoder.decode(arrayBuffer);
+      let parsed = JSON.parse(text);
+
+      // ✅ 중첩 구조 감지 시 언랩
+      if (
+        Object.keys(parsed).length === 1 &&
+        typeof parsed[Object.keys(parsed)[0]] === "object"
+      ) {
+        parsed = parsed[Object.keys(parsed)[0]];
+        console.log("[DEBUG][CACHE] ⚙️ 중첩된 JSON 구조 감지 — 자동 언랩 처리됨");
+      }
+
+      const keyCount = Object.keys(parsed).length;
+      console.log(`[DEBUG][CACHE] ✅ ${keyCount}개 캐시 로드`);
+
+      if (keyCount < 50) {
+        console.warn(
+          "[WARN][CACHE] ⚠️ 캐시 수가 비정상적으로 적음 — JSON 일부만 읽혔을 수 있음"
+        );
+      }
+
+      setGeoCache(parsed);
+      setTimeout(() => renderMarkers(), 800);
+    } catch (err) {
+      console.error("[ERROR][CACHE] 캐시 로드 실패:", err.message);
+    }
+  };
+
+  loadGeoCache();
+}, [loggedIn, currentUser]);
+
 
     loadGeoCache();
     setTimeout(() => renderMarkers(), 800);
