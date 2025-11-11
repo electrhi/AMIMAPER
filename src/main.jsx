@@ -130,7 +130,7 @@ useEffect(() => {
       console.log(`[DEBUG][CACHE] 📦 캐시 불러오기 시도: ${GEO_CACHE_FILE}`);
       const { data: cacheBlob, error } = await supabase.storage
         .from("excels")
-        .download(GEO_CACHE_FILE);
+        .download(`${GEO_CACHE_FILE}?v=${Date.now()}`); // ✅ 강제 캐시 무효화 추가
 
       if (error) {
         console.warn("[DEBUG][CACHE] ❌ 캐시 없음 — 새로 생성 예정");
