@@ -138,12 +138,30 @@ useEffect(() => {
         return;
       }
 
-      const arrayBuffer = await cacheBlob.arrayBuffer();
+      // ✅ Blob을 ArrayBuffer로 읽기 (대용량 안전)
+      const reader = cacheBlob.stream().getReader();
+      const chunks = [];
+      let total = 0;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        total += value.length;
+      }
+
+      const fullBuffer = new Uint8Array(total);
+      let offset = 0;
+      for (const chunk of chunks) {
+        fullBuffer.set(chunk, offset);
+        offset += chunk.length;
+      }
+
       const decoder = new TextDecoder("utf-8");
-      const text = decoder.decode(arrayBuffer);
+      const text = decoder.decode(fullBuffer);
       let parsed = JSON.parse(text);
 
-      // ✅ 중첩 구조 감지 및 반복 언랩
+      // ✅ 중첩 감지 시 언랩
       let unwrapDepth = 0;
       while (
         Object.keys(parsed).length === 1 &&
@@ -152,6 +170,7 @@ useEffect(() => {
         parsed = parsed[Object.keys(parsed)[0]];
         unwrapDepth++;
       }
+
       if (unwrapDepth > 0) {
         console.log(`[DEBUG][CACHE] ⚙️ 중첩 구조 ${unwrapDepth}회 언랩 처리됨`);
       }
