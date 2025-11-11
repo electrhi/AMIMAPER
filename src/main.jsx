@@ -272,10 +272,21 @@ if (!address || address.trim() === "") {
 
   /** 데이터 변경 시 지도 렌더링 **/
   useEffect(() => {
-    if (!map || data.length === 0) return;
-    console.log("[DEBUG][MAP] 🧭 지도 렌더링 시작...");
-    renderMarkers();
-  }, [map, data]);
+  if (!map || data.length === 0) return;
+
+  const waitForKakaoEvent = setInterval(() => {
+    if (window.kakao?.maps?.event) {
+      clearInterval(waitForKakaoEvent);
+      console.log("[DEBUG][MAP] 🧭 지도 렌더링 시작 (이벤트 모듈 확인 완료)");
+      renderMarkers();
+    } else {
+      console.log("[DEBUG][MAP] ⏳ kakao.maps.event 로딩 대기 중...");
+    }
+  }, 300);
+
+  return () => clearInterval(waitForKakaoEvent);
+}, [map, data]);
+
 
 /** 마커 렌더링 **/
 const renderMarkers = async () => {
