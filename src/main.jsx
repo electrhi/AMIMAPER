@@ -136,9 +136,20 @@ function App() {
           return;
         }
         const text = await cacheBlob.text();
-        const parsed = JSON.parse(text);
+        let parsed = JSON.parse(text);
+
+        // ✅ 혹시 루트에 파일명이 감싸고 있으면 풀어준다
+        if (
+          Object.keys(parsed).length === 1 &&
+          typeof parsed[Object.keys(parsed)[0]] === "object"
+          ) {
+          parsed = parsed[Object.keys(parsed)[0]];
+          console.log("[DEBUG][CACHE] ⚙️ 중첩된 JSON 구조 감지 — 자동 언랩 처리됨");
+          }
+
         console.log(`[DEBUG][CACHE] ✅ ${Object.keys(parsed).length}개 캐시 로드`);
         setGeoCache(parsed);
+
       } catch (err) {
         console.error("[ERROR][CACHE] 캐시 로드 실패:", err.message);
       }
