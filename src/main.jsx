@@ -460,8 +460,16 @@ popupEl.appendChild(document.createElement("hr"));
           console.log("[DEBUG][MAP] 🧩 팝업 표시 완료:", list[0].address);
         };
 
-        markerEl.addEventListener("click", openPopup);
-        markerEl.addEventListener("touchstart", openPopup);
+        // ✅ 안전 검사: 지도나 마커 엘리먼트가 존재하는지 확인
+if (!map) {
+  console.warn("[WARN][MAP] 지도(map)가 아직 생성되지 않아 이벤트 등록을 건너뜁니다.");
+} else if (!markerEl) {
+  console.warn("[WARN][MAP] markerEl이 존재하지 않아 이벤트 등록을 건너뜁니다.");
+} else {
+  markerEl.addEventListener("click", openPopup);
+  markerEl.addEventListener("touchstart", openPopup);
+}
+
       });
 
       window.kakao.maps.event.addListener(map, "click", () => {
