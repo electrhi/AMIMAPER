@@ -318,8 +318,13 @@ const renderMarkers = async () => {
 const uniqueGroupSet = new Set();
 
 for (const row of filteredData) {
-  const coords = await geocodeAddress(geocoder, row.address);
-  if (!coords) continue;
+  // ✅ 캐시에 있으면 바로 사용
+const coords = geoCache[row.address];
+if (!coords) {
+  console.warn(`[WARN][MAP] 좌표 없음 (캐시에 없음): ${row.address}`);
+  return;
+}
+
 
   const key = `${coords.lat},${coords.lng}`;
 
