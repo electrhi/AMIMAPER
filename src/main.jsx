@@ -138,19 +138,22 @@ useEffect(() => {
         return;
       }
 
-      // ✅ ArrayBuffer로 안전하게 읽기 (대용량 대응)
       const arrayBuffer = await cacheBlob.arrayBuffer();
       const decoder = new TextDecoder("utf-8");
       const text = decoder.decode(arrayBuffer);
       let parsed = JSON.parse(text);
 
-      // ✅ 중첩 구조 감지 시 언랩
-      if (
+      // ✅ 중첩 구조 감지 및 반복 언랩
+      let unwrapDepth = 0;
+      while (
         Object.keys(parsed).length === 1 &&
         typeof parsed[Object.keys(parsed)[0]] === "object"
       ) {
         parsed = parsed[Object.keys(parsed)[0]];
-        console.log("[DEBUG][CACHE] ⚙️ 중첩된 JSON 구조 감지 — 자동 언랩 처리됨");
+        unwrapDepth++;
+      }
+      if (unwrapDepth > 0) {
+        console.log(`[DEBUG][CACHE] ⚙️ 중첩 구조 ${unwrapDepth}회 언랩 처리됨`);
       }
 
       const keyCount = Object.keys(parsed).length;
@@ -163,8 +166,6 @@ useEffect(() => {
       }
 
       setGeoCache(parsed);
-
-      // ✅ 캐시 로드 후 마커 렌더링
       setTimeout(() => renderMarkers(), 800);
     } catch (err) {
       console.error("[ERROR][CACHE] 캐시 로드 실패:", err.message);
