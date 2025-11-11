@@ -24,7 +24,10 @@ function App() {
 
   let activeOverlay = null;
   let markers = [];
-  const geoCache = JSON.parse(localStorage.getItem("geoCache") || "{}");
+  // ✅ Supabase 기반 캐시 저장용
+  const [geoCache, setGeoCache] = useState({});
+  const GEO_CACHE_FILE = `geoCache_${currentUser?.data_file || "default"}.json`;
+
 
   // ✅ 추가: 팝업 닫기 최신 참조 관리용
   const getActiveOverlay = () => window.__activeOverlayRef || null;
@@ -133,6 +136,35 @@ const loadData = async (fileName) => {
     document.head.appendChild(script);
   }, [loggedIn]);
 
+  /** ✅ Supabase에서 geoCache 파일 로드 **/
+useEffect(() => {
+  if (!loggedIn || !currentUser) return;
+
+  const loadGeoCache = async () => {
+    try {
+      console.log(`[DEBUG][CACHE] 📦 캐시 불러오기 시도: ${GEO_CACHE_FILE}`);
+      const { data: cacheBlob, error } = await supabase.storage
+        .from("excels")
+        .download(GEO_CACHE_FILE);
+
+      if (error) {
+        console.warn("[DEBUG][CACHE] ❌ 캐시 없음 — 새로 생성 예정");
+        setGeoCache({});
+        return;
+      }
+
+      const text = await cacheBlob.text();
+      const parsed = JSON.parse(text);
+      console.log(`[DEBUG][CACHE] ✅ 캐시 ${Object.keys(parsed).length}개 로드 완료`);
+      setGeoCache(parsed);
+    } catch (err) {
+      console.error("[ERROR][CACHE] 캐시 로드 실패:", err.message);
+    }
+  };
+
+  loadGeoCache();
+}, [loggedIn, currentUser]);
+
   /** 내 위치 마커 표시 **/
   useEffect(() => {
     if (!map || !currentUser) return;
@@ -190,26 +222,47 @@ const loadData = async (fileName) => {
   };
 
   /** 주소 → 좌표 변환 **/
-  const geocodeAddress = (geocoder, address) =>
-    new Promise((resolve) => {
-      if (geoCache[address]) {
-        console.log(`[DEBUG][GEO] 💾 캐시 HIT: ${address}`);
-        return resolve(geoCache[address]);
-      }
-      geocoder.addressSearch(address, (result, status) => {
-        if (status === window.kakao.maps.services.Status.OK) {
-          const lat = parseFloat(result[0].y).toFixed(5);
-          const lng = parseFloat(result[0].x).toFixed(5);
-          geoCache[address] = { lat, lng };
-          localStorage.setItem("geoCache", JSON.stringify(geoCache));
-          console.log(`[DEBUG][GEO] 🌐 Geocode 성공: ${address} → (${lat}, ${lng})`);
-          resolve({ lat, lng });
-        } else {
-          console.warn(`[DEBUG][GEO] ⚠️ 지오코딩 실패: ${address} (${status})`);
-          resolve(null);
+  /** ✅ 주소 → 좌표 변환 + Supabase 캐시 업로드 **/
+const geocodeAddress = (geocoder, address) =>
+  new Promise(async (resolve) => {
+    if (geoCache[address]) {
+      console.log(`[DEBUG][GEO] 💾 캐시 HIT: ${address}`);
+      return resolve(geoCache[address]);
+    }
+
+    // 실제 Kakao API 호출
+    geocoder.addressSearch(address, async (result, status) => {
+      if (status === window.kakao.maps.services.Status.OK) {
+        const lat = parseFloat(result[0].y).toFixed(5);
+        const lng = parseFloat(result[0].x).toFixed(5);
+
+        const newCache = { ...geoCache, [address]: { lat, lng } };
+        setGeoCache(newCache);
+
+        console.log(`[DEBUG][GEO] 🌐 Geocode 성공: ${address} → (${lat}, ${lng})`);
+
+        // ✅ Supabase에 캐시 업로드
+        try {
+          const { error: upError } = await supabase.storage
+            .from("excels")
+            .upload(GEO_CACHE_FILE, JSON.stringify(newCache), {
+              upsert: true,
+              contentType: "application/json",
+            });
+
+          if (upError) console.warn("[WARN][CACHE] 캐시 업로드 실패:", upError.message);
+          else console.log(`[DEBUG][CACHE] 💾 ${GEO_CACHE_FILE} 업로드 완료`);
+        } catch (e) {
+          console.error("[ERROR][CACHE] 업로드 실패:", e.message);
         }
-      });
+
+        resolve({ lat, lng });
+      } else {
+        console.warn(`[DEBUG][GEO] ⚠️ 지오코딩 실패: ${address} (${status})`);
+        resolve(null);
+      }
     });
+  });
 
   /** 데이터 변경 시 지도 렌더링 **/
   useEffect(() => {
