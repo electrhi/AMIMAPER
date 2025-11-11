@@ -336,10 +336,36 @@ const renderMarkersPartial = (coords, newStatus) => {
   console.log(`[DEBUG][MAP] 🟢 반경 1km 내 ${updatedCount}개 마커 색상만 변경`);
 };
 
+/** ✅ geoCache 매칭 최초 1회만 수행 **/
+useEffect(() => {
+  if (!geoCache || Object.keys(geoCache).length === 0) return;
+  if (!data || data.length === 0) return;
+
+  console.log("[DEBUG][GEO] 🔄 geoCache 매칭 시작 (최초 1회)");
+
+  const matchedData = data.map((row) => {
+    const addr = row["주소"]?.trim();
+    const cached = geoCache[addr];
+    if (cached) {
+      return {
+        ...row,
+        lat: parseFloat(cached.lat),
+        lng: parseFloat(cached.lng),
+      };
+    } else {
+      return { ...row, lat: null, lng: null };
+    }
+  });
+
+  console.log("[DEBUG][GEO] ✅ geoCache 매칭 완료:", matchedData.length, "행");
+
+  setData(matchedData);
+}, [geoCache]);
 
   
 
  /** 마커 렌더링 **/
+/** 마커 렌더링 **/
 const renderMarkers = async () => {
   try {
     if (!map || !data.length) {
@@ -354,7 +380,6 @@ const renderMarkers = async () => {
     markers = [];
 
     const grouped = {};
-    const failedAddresses = [];
     const statusCount = { 완료: 0, 불가: 0, 미방문: 0 };
 
     // ✅ 최신 데이터만 유지
@@ -364,63 +389,37 @@ const renderMarkers = async () => {
       if (!latestPerMeter[d.meter_id]) latestPerMeter[d.meter_id] = d;
     });
     const filteredData = Object.values(latestPerMeter);
-    // 수정
+
+    // ✅ state 변경 최소화
     setCounts((prev) => {
       const same =
-      prev.완료 === statusCount.완료 &&
-      prev.불가 === statusCount.불가 &&
-      prev.미방문 === statusCount.미방문;
-    return same ? prev : statusCount; // ✅ 값이 같으면 state 변경 안 함
+        prev.완료 === statusCount.완료 &&
+        prev.불가 === statusCount.불가 &&
+        prev.미방문 === statusCount.미방문;
+      return same ? prev : statusCount;
     });
 
     console.log(
       `[DEBUG][MAP] ✅ 데이터 정제 완료 — ${filteredData.length}건 처리 중...`
     );
 
-    // ✅ 주소 그룹핑 + 캐시 좌표 매칭
+    // ✅ 주소 그룹핑 (lat/lng 기반 — geoCache 재조회 없음)
     const uniqueGroupSet = new Set();
     for (const row of filteredData) {
-      if (!row.address) continue;
+      const { address, lat, lng } = row;
+      if (!lat || !lng || !address) continue;
 
-      const cleanAddr = row.address.trim().replace(/\s+/g, " ");
-      let coords = geoCache[cleanAddr];
-
-      // 🔍 공백 제거 후 대체 매칭
-      if (!coords) {
-        const altKey = Object.keys(geoCache).find(
-          (k) => k.replace(/\s+/g, "") === cleanAddr.replace(/\s+/g, "")
-        );
-        if (altKey) {
-          coords = geoCache[altKey];
-          console.log(
-            `[DEBUG][GEO] ⚙️ 캐시 대체 매칭 성공: ${cleanAddr} → ${altKey}`
-          );
-        }
-      }
-
-      if (!coords) {
-        failedAddresses.push(cleanAddr);
-        continue;
-      }
-
-      const key = `${coords.lat},${coords.lng}`;
+      const cleanAddr = address.trim().replace(/\s+/g, " ");
+      const key = `${lat},${lng}`;
       const uniqueKey = `${cleanAddr}_${row.meter_id}`;
       if (uniqueGroupSet.has(uniqueKey)) continue;
       uniqueGroupSet.add(uniqueKey);
 
-      if (!grouped[key]) grouped[key] = { coords, list: [] };
+      if (!grouped[key]) grouped[key] = { coords: { lat, lng }, list: [] };
       grouped[key].list.push(row);
     }
 
-    // ⚠️ 실패 주소 통계
-    if (failedAddresses.length > 0) {
-      console.warn(
-        `[WARN][GEO] ❌ 좌표 실패 ${failedAddresses.length}건 / ${data.length}행`
-      );
-      console.log("[DEBUG][GEO] 🔍 실패 샘플:", failedAddresses.slice(0, 10));
-    }
-
-    // ✅ 계기타입 매핑표
+    // ✅ 계기 타입 매핑 (유지)
     const meter_mapping = {
       "17": "E-Type",
       "18": "E-Type",
@@ -554,6 +553,7 @@ const renderMarkers = async () => {
     console.error("[ERROR][MAP] 마커 렌더링 실패:", e);
   }
 };
+
 
   /** ✅ 마커 렌더링 자동 트리거 — map + data + geoCache 모두 준비된 뒤 실행 **/
 useEffect(() => {
