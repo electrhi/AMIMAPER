@@ -348,31 +348,31 @@ const openPopup = async (e) => {
   popupEl.appendChild(document.createElement("br"));
   popupEl.appendChild(document.createElement("br"));
 
-  // ✅ 중복 계기번호 빨간색 표시
-  const last2 = list.map((g) => g.meter_id.slice(-2));
-  const duplicates = last2.filter((x, i) => last2.indexOf(x) !== i);
-  list.forEach((g) => {
-    const div = document.createElement("div");
-    list.forEach((g) => {
+// ✅ 중복 계기번호 감지
+const allIds = list.map((g) => g.meter_id);
+const duplicates = allIds.filter((id, i) => allIds.indexOf(id) !== i);
+
+// ✅ 중복 제거된 계기번호만 표시
+const uniqueMeters = Array.from(new Set(allIds));
+
+uniqueMeters.forEach((id) => {
   const div = document.createElement("div");
 
   // ✅ 계기번호에서 3~4번째 자리 추출
-  const mid = g.meter_id?.substring(2, 4) || "";
+  const mid = id.substring(2, 4);
   const type = meter_mapping[mid] || "확인필요";
 
-  div.textContent = `${g.meter_id} | ${type}`;
+  // ✅ 기본 표시
+  div.textContent = `${id} | ${type}`;
 
   // ✅ 중복 계기번호는 빨간색
-  if (duplicates.includes(g.meter_id.slice(-2))) div.style.color = "red";
+  if (duplicates.includes(id)) div.style.color = "red";
 
   popupEl.appendChild(div);
 });
 
-    if (duplicates.includes(g.meter_id.slice(-2))) div.style.color = "red";
-    popupEl.appendChild(div);
-  });
+popupEl.appendChild(document.createElement("hr"));
 
-  popupEl.appendChild(document.createElement("hr"));
 
 
           const buttons = ["완료", "불가", "미방문", "가기"];
