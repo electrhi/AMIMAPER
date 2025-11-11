@@ -285,6 +285,74 @@ useEffect(() => {
     }
   };
 
+  // ✅ 거리 계산 함수 (미터 단위)
+  const distanceInMeters = (lat1, lon1, lat2, lon2) => {
+  const R = 6371000; // 지구 반경 (m)
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) ** 2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c; // 미터 단위로 반환
+};
+
+// ✅ 클릭한 지점 반경 1km 이내 마커들만 색상 업데이트
+  const renderMarkersPartial = (coords, newStatus) => {
+  const RADIUS = 1000; // 1km
+  const lat = parseFloat(coords.lat);
+  const lng = parseFloat(coords.lng);
+  let updatedCount = 0;
+
+  markers.forEach((overlay, idx) => {
+    const pos = overlay.getPosition?.();
+    if (!pos) return;
+
+    const mLat = pos.getLat();
+    const mLng = pos.getLng();
+
+    // 📏 거리 계산
+    const d = distanceInMeters(lat, lng, mLat, mLng);
+    if (d <= RADIUS) {
+      const color =
+        newStatus === "완료"
+          ? "green"
+          : newStatus === "불가"
+          ? "red"
+          : "blue";
+
+      const markerEl = document.createElement("div");
+      markerEl.style.cssText = `
+        background:${color};
+        border-radius:50%;
+        width:30px;height:30px;
+        color:white;font-size:12px;
+        line-height:30px;text-align:center;
+        box-shadow:0 0 5px rgba(0,0,0,0.4);
+        cursor:pointer;
+        transition: background 0.3s ease;
+      `;
+      markerEl.textContent = "?"; // 마커 숫자 표시 필요시 여기에 숫자 넣기
+
+      const newOverlay = new window.kakao.maps.CustomOverlay({
+        position: pos,
+        content: markerEl,
+        yAnchor: 1,
+      });
+
+      overlay.setMap(null);
+      newOverlay.setMap(map);
+      markers[idx] = newOverlay;
+      updatedCount++;
+    }
+  });
+
+  console.log(`[DEBUG][MAP] 🔁 반경 1km 내 마커 ${updatedCount}개 업데이트 완료`);
+};
+
+
 
   
 
@@ -547,7 +615,8 @@ useEffect(() => {
       console.log("[DEBUG][STATUS] ✅ DB 업데이트 완료:", payload);
 
       await fetchLatestStatus();
-      await renderMarkers();
+      renderMarkersPartial(coords, newStatus); // ✅ 이걸로 교체
+
 
       if (currentUser.can_view_others) await loadOtherUserLocations();
 
