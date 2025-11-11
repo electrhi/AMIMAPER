@@ -162,7 +162,11 @@ useEffect(() => {
     }
   };
 
-  loadGeoCache();
+    loadGeoCache();
+
+  // ✅ 캐시 로드 후 마커 렌더링 약간 지연 실행
+  setTimeout(() => renderMarkers(), 800);
+
 }, [loggedIn, currentUser]);
 
   /** 내 위치 마커 표시 **/
