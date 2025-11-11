@@ -313,7 +313,14 @@ const renderMarkers = async () => {
       if (!latestPerMeter[d.meter_id]) latestPerMeter[d.meter_id] = d;
     });
     const filteredData = Object.values(latestPerMeter);
-    setCounts(statusCount);
+    // 수정
+    setCounts((prev) => {
+      const same =
+      prev.완료 === statusCount.완료 &&
+      prev.불가 === statusCount.불가 &&
+      prev.미방문 === statusCount.미방문;
+    return same ? prev : statusCount; // ✅ 값이 같으면 state 변경 안 함
+    });
 
     console.log(
       `[DEBUG][MAP] ✅ 데이터 정제 완료 — ${filteredData.length}건 처리 중...`
