@@ -230,6 +230,12 @@ const geocodeAddress = (geocoder, address) =>
       return resolve(geoCache[address]);
     }
 
+    // 👇 여기에 추가
+if (!address || address.trim() === "") {
+  console.warn("[WARN][GEO] 주소가 비어있음 → 스킵");
+  return resolve(null);
+}
+
     // 실제 Kakao API 호출
     geocoder.addressSearch(address, async (result, status) => {
       if (status === window.kakao.maps.services.Status.OK) {
