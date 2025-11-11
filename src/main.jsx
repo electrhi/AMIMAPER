@@ -295,7 +295,7 @@ if (!address || address.trim() === "") {
 /** 마커 렌더링 **/
 const renderMarkers = async () => {
   try {
-    console.log("[DEBUG][MAP] 🧹 기존 마커 초기화:", markers.length);
+    const failedAddresses = []; // ✅ 실패한 주소 담는 배열
     markers.forEach((m) => m.setMap(null));
     markers = [];
     activeOverlay = null;
@@ -318,16 +318,35 @@ const renderMarkers = async () => {
 const uniqueGroupSet = new Set();
 
 for (const row of filteredData) {
-  // ✅ 앞뒤 공백 제거 후 캐시 조회
-const addrKey = row.address.trim().replace(/\s+/g, " ");
-const coords = geoCache[addrKey];
-if (!coords) {
-  console.warn(`[WARN][MAP] 좌표 없음 (캐시에 없음): ${addrKey}`);
-  return;
-}
+  const addrKey = row.address?.trim().replace(/\s+/g, " ");
+  let coords = geoCache[addrKey];
 
+  // ✅ 캐시에 없으면 API 재시도
+  if (!coords) {
+    console.warn(`[WARN][MAP] 캐시에 없음 → API 재시도: ${addrKey}`);
+    coords = await geocodeAddress(new window.kakao.maps.services.Geocoder(), addrKey);
+  }
+
+  // ✅ 여전히 좌표가 없으면 실패 리스트에 추가하고 건너뜀
+  if (!coords || !coords.lat || !coords.lng) {
+    failedAddresses.push(addrKey);
+    continue;
+  }
 
   const key = `${coords.lat},${coords.lng}`;
+  const uniqueKey = `${addrKey}_${row.meter_id}`;
+  if (uniqueGroupSet.has(uniqueKey)) continue;
+  uniqueGroupSet.add(uniqueKey);
+
+  if (!grouped[key]) grouped[key] = { coords, list: [] };
+  grouped[key].list.push(row);
+}
+
+// ✅ 모든 데이터 처리 후, 실패 주소 콘솔에 출력
+if (failedAddresses.length > 0) {
+  console.warn(`[WARN][GEO] ❌ 지오코딩 실패 ${failedAddresses.length}건`);
+  console.table(failedAddresses);
+}
 
   // ✅ 중복 방지 키 생성: 주소 + 계기번호 조합
   const uniqueKey = `${row.address}_${row.meter_id}`;
