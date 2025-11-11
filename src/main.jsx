@@ -299,23 +299,25 @@ useEffect(() => {
   return R * c; // 미터 단위로 반환
 };
 
-// ✅ 클릭한 지점 반경 1km 이내 마커들만 색상 업데이트
-  const renderMarkersPartial = (coords, newStatus) => {
+// ✅ 클릭한 지점 반경 1km 이내 마커들만 색상 업데이트 (빠른 버전)
+const renderMarkersPartial = (coords, newStatus) => {
   const RADIUS = 1000; // 1km
   const lat = parseFloat(coords.lat);
   const lng = parseFloat(coords.lng);
   let updatedCount = 0;
 
-  markers.forEach((overlay, idx) => {
+  markers.forEach((overlay) => {
     const pos = overlay.getPosition?.();
     if (!pos) return;
 
     const mLat = pos.getLat();
     const mLng = pos.getLng();
-
-    // 📏 거리 계산
     const d = distanceInMeters(lat, lng, mLat, mLng);
+
     if (d <= RADIUS) {
+      const el = overlay.getContent();
+      if (!el) return;
+
       const color =
         newStatus === "완료"
           ? "green"
@@ -323,35 +325,16 @@ useEffect(() => {
           ? "red"
           : "blue";
 
-      const markerEl = document.createElement("div");
-      markerEl.style.cssText = `
-        background:${color};
-        border-radius:50%;
-        width:30px;height:30px;
-        color:white;font-size:12px;
-        line-height:30px;text-align:center;
-        box-shadow:0 0 5px rgba(0,0,0,0.4);
-        cursor:pointer;
-        transition: background 0.3s ease;
-      `;
-      markerEl.textContent = "?"; // 마커 숫자 표시 필요시 여기에 숫자 넣기
+      // ✅ 기존 요소의 색상만 바꾸기 (재생성 안함)
+      el.style.background = color;
+      el.style.transition = "background 0.3s ease";
 
-      const newOverlay = new window.kakao.maps.CustomOverlay({
-        position: pos,
-        content: markerEl,
-        yAnchor: 1,
-      });
-
-      overlay.setMap(null);
-      newOverlay.setMap(map);
-      markers[idx] = newOverlay;
       updatedCount++;
     }
   });
 
-  console.log(`[DEBUG][MAP] 🔁 반경 1km 내 마커 ${updatedCount}개 업데이트 완료`);
+  console.log(`[DEBUG][MAP] 🟢 반경 1km 내 ${updatedCount}개 마커 색상만 변경`);
 };
-
 
 
   
