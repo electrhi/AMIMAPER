@@ -138,30 +138,40 @@ useEffect(() => {
         return;
       }
 
-      // ✅ Blob을 ArrayBuffer로 읽기 (대용량 안전)
-      const reader = cacheBlob.stream().getReader();
-      const chunks = [];
-      let total = 0;
+      console.log(
+        `[DEBUG][CACHE] ✅ Blob 수신 완료 — 크기: ${cacheBlob.size.toLocaleString()} bytes`
+      );
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-        total += value.length;
-      }
+      // ✅ 1단계: Blob -> ArrayBuffer
+      const arrayBuffer = await cacheBlob.arrayBuffer();
+      console.log(
+        `[DEBUG][CACHE] ✅ ArrayBuffer 생성 완료 — 길이: ${arrayBuffer.byteLength.toLocaleString()}`
+      );
 
-      const fullBuffer = new Uint8Array(total);
-      let offset = 0;
-      for (const chunk of chunks) {
-        fullBuffer.set(chunk, offset);
-        offset += chunk.length;
-      }
-
+      // ✅ 2단계: 문자열 디코딩
       const decoder = new TextDecoder("utf-8");
-      const text = decoder.decode(fullBuffer);
-      let parsed = JSON.parse(text);
+      const text = decoder.decode(arrayBuffer);
+      console.log(
+        `[DEBUG][CACHE] ✅ TextDecoder 변환 완료 — 문자열 길이: ${text.length.toLocaleString()}`
+      );
 
-      // ✅ 중첩 감지 시 언랩
+      // ✅ 3단계: 첫/끝 300자만 확인
+      console.log("[DEBUG][CACHE] 📄 JSON 시작 부분 미리보기 ↓");
+      console.log(text.slice(0, 300));
+      console.log("[DEBUG][CACHE] 📄 JSON 끝 부분 미리보기 ↓");
+      console.log(text.slice(-300));
+
+      // ✅ 4단계: 파싱
+      let parsed;
+      try {
+        parsed = JSON.parse(text);
+      } catch (err) {
+        console.error("[ERROR][CACHE] ❌ JSON 파싱 실패:", err.message);
+        console.log("[DEBUG][CACHE] ⚠️ 텍스트 일부:", text.slice(0, 500));
+        return;
+      }
+
+      // ✅ 5단계: 중첩 언랩
       let unwrapDepth = 0;
       while (
         Object.keys(parsed).length === 1 &&
@@ -184,6 +194,10 @@ useEffect(() => {
         );
       }
 
+      // ✅ 6단계: 메모리 점검
+      const sampleKeys = Object.keys(parsed).slice(0, 5);
+      console.log("[DEBUG][CACHE] 🔍 샘플 키 5개:", sampleKeys);
+
       setGeoCache(parsed);
       setTimeout(() => renderMarkers(), 800);
     } catch (err) {
@@ -193,6 +207,7 @@ useEffect(() => {
 
   loadGeoCache();
 }, [loggedIn, currentUser]);
+
 
 
   /** 주소 → 좌표 변환 (Python 캐시만 사용) **/
