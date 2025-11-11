@@ -240,15 +240,24 @@ const renderMarkers = async () => {
     setCounts(statusCount);
     console.log("[DEBUG][MAP] 🔄 상태 카운트:", statusCount);
 
-    // ✅ 기존 for (const row of data) → 변경
-    for (const row of filteredData) {
-      const coords = await geocodeAddress(geocoder, row.address);
-      if (!coords) continue;
+// ✅ 중복 제거용 Set 생성
+const uniqueGroupSet = new Set();
 
-      const key = `${coords.lat},${coords.lng}`;
-      if (!grouped[key]) grouped[key] = { coords, list: [] };
-      grouped[key].list.push(row);
-    }
+for (const row of filteredData) {
+  const coords = await geocodeAddress(geocoder, row.address);
+  if (!coords) continue;
+
+  const key = `${coords.lat},${coords.lng}`;
+
+  // ✅ 중복 방지 키 생성: 주소 + 계기번호 조합
+  const uniqueKey = `${row.address}_${row.meter_id}`;
+  if (uniqueGroupSet.has(uniqueKey)) continue; // 이미 추가된 경우 skip
+  uniqueGroupSet.add(uniqueKey);
+
+  if (!grouped[key]) grouped[key] = { coords, list: [] };
+  grouped[key].list.push(row);
+}
+
 
 
       Object.keys(grouped).forEach((key) => {
