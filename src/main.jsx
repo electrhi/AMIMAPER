@@ -348,14 +348,6 @@ if (failedAddresses.length > 0) {
   console.table(failedAddresses);
 }
 
-  // ✅ 중복 방지 키 생성: 주소 + 계기번호 조합
-  const uniqueKey = `${row.address}_${row.meter_id}`;
-  if (uniqueGroupSet.has(uniqueKey)) continue; // 이미 추가된 경우 skip
-  uniqueGroupSet.add(uniqueKey);
-
-  if (!grouped[key]) grouped[key] = { coords, list: [] };
-  grouped[key].list.push(row);
-}
 
 
 
