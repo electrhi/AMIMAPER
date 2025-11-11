@@ -175,9 +175,6 @@ useEffect(() => {
 }, [loggedIn, currentUser]);
 
 
-    loadGeoCache();
-    setTimeout(() => renderMarkers(), 800);
-  }, [loggedIn, currentUser]);
   /** 주소 → 좌표 변환 (Python 캐시만 사용) **/
   const geocodeAddress = async (address) => {
     if (!address || address.trim() === "") {
