@@ -343,10 +343,21 @@ useEffect(() => {
 
   console.log("[DEBUG][GEO] 🔄 geoCache 매칭 시작 (최초 1회)");
 
+  // ✅ 공백 정리 & 안전 매칭
   const matchedData = data.map((row) => {
-    const addr = row["주소"]?.trim();
-    const cached = geoCache[addr];
-    if (cached) {
+    const addr = row["주소"]?.trim()?.replace(/\s+/g, " ");
+    if (!addr) return { ...row, lat: null, lng: null };
+
+    // ✅ 다양한 패턴으로 geoCache에서 탐색 (공백/유사 문자열 대응)
+    const cached =
+      geoCache[addr] ||
+      geoCache[`${addr} `] ||
+      geoCache[` ${addr}`] ||
+      Object.entries(geoCache).find(
+        ([k]) => k.replace(/\s+/g, "") === addr.replace(/\s+/g, "")
+      )?.[1];
+
+    if (cached && cached.lat && cached.lng) {
       return {
         ...row,
         lat: parseFloat(cached.lat),
@@ -357,7 +368,10 @@ useEffect(() => {
     }
   });
 
-  console.log("[DEBUG][GEO] ✅ geoCache 매칭 완료:", matchedData.length, "행");
+  const validCount = matchedData.filter((d) => d.lat && d.lng).length;
+  console.log(
+    `[DEBUG][GEO] ✅ geoCache 매칭 완료: ${validCount}/${matchedData.length}건 좌표 주입됨`
+  );
 
   setData(matchedData);
 }, [geoCache]);
