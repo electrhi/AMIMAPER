@@ -343,46 +343,121 @@ const renderMarkersPartial = (coords, newStatus) => {
   console.log(`[DEBUG][MAP] 🟢 반경 1km 내 ${updatedCount}개 마커 색상만 변경`);
 };
 
-/** ✅ geoCache 매칭 최초 1회만 수행 **/
+/** ✅ geoCache 매칭 최초 1회 + 디버그 강화 **/
 useEffect(() => {
   if (!geoCache || Object.keys(geoCache).length === 0) return;
   if (!data || data.length === 0) return;
 
   console.log("[DEBUG][GEO] 🔄 geoCache 매칭 시작 (최초 1회)");
+  console.log(`[DEBUG][GEO] geoCache 키 수: ${Object.keys(geoCache).length}`);
+  console.log(`[DEBUG][GEO] 데이터 행 수: ${data.length}`);
 
-  // ✅ 안전한 문자열 정규화 함수
+  // ✅ 문자열 정규화 함수
   const normalize = (str) =>
     str
       ?.toString()
       .trim()
       .replace(/\s+/g, " ")
-      .replace(/\u3000/g, " ") // 전각 공백
+      .replace(/\u3000/g, " ") // 전각 스페이스 제거
       .replace(/\r|\n|\t/g, ""); // 줄바꿈/탭 제거
 
-  const matchedData = data.map((row) => {
+  // ✅ 캐시 키 정규화 미리 맵으로 보관 (성능 향상 + 디버깅)
+  const normalizedGeoCache = {};
+  for (const [key, value] of Object.entries(geoCache)) {
+    const nk = normalize(key);
+    if (!nk) continue;
+    normalizedGeoCache[nk] = value;
+  }
+
+  console.log(`[DEBUG][GEO] 캐시 정규화 후 키 수: ${Object.keys(normalizedGeoCache).length}`);
+
+  let matched = 0;
+  const unmatchedSamples = [];
+
+  const matchedData = data.map((row, idx) => {
     const addr = normalize(row["주소"]);
-    if (!addr) return { ...row, lat: null, lng: null };
+    if (!addr) {
+      unmatchedSamples.push({
+        index: idx,
+        raw: row["주소"],
+        normalized: addr,
+        reason: "빈 주소",
+      });
+      return { ...row, lat: null, lng: null };
+    }
 
-    // ✅ geoCache의 키도 미리 정규화해서 비교
-    const cachedEntry = Object.entries(geoCache).find(
-      ([k]) => normalize(k) === addr
-    );
-
-    if (cachedEntry && cachedEntry[1]?.lat && cachedEntry[1]?.lng) {
-      const cached = cachedEntry[1];
+    const cached = normalizedGeoCache[addr];
+    if (cached && cached.lat && cached.lng) {
+      matched++;
       return {
         ...row,
         lat: parseFloat(cached.lat),
         lng: parseFloat(cached.lng),
       };
+    } else {
+      // ✅ 유사 매칭 탐색 (공백 제거 후 비교)
+      const looseMatch = Object.entries(normalizedGeoCache).find(
+        ([k]) => k.replace(/\s+/g, "") === addr.replace(/\s+/g, "")
+      )?.[1];
+
+      if (looseMatch && looseMatch.lat && looseMatch.lng) {
+        matched++;
+        return {
+          ...row,
+          lat: parseFloat(looseMatch.lat),
+          lng: parseFloat(looseMatch.lng),
+        };
+      }
+
+      if (unmatchedSamples.length < 20) {
+        unmatchedSamples.push({
+          index: idx,
+          excel: row["주소"],
+          normalizedExcel: addr,
+          exampleCacheKey: Object.keys(normalizedGeoCache).find((k) =>
+            k.includes(addr.split(" ")[2] || "")
+          ),
+        });
+      }
+
+      return { ...row, lat: null, lng: null };
     }
-    return { ...row, lat: null, lng: null };
   });
 
-  const validCount = matchedData.filter((d) => d.lat && d.lng).length;
+  const validCount = matched;
   console.log(
     `[DEBUG][GEO] ✅ geoCache 매칭 완료: ${validCount}/${matchedData.length}건 좌표 주입됨`
   );
+
+  if (validCount === 0) {
+    console.warn("⚠️ [DEBUG][GEO] 모든 주소 매칭 실패 — 주소 포맷이 다를 수 있습니다.");
+  }
+
+  // ✅ 매칭 실패 예시 10개 출력
+  if (unmatchedSamples.length > 0) {
+    console.groupCollapsed(`[DEBUG][GEO] ❌ 매칭 실패 샘플 ${unmatchedSamples.length}건 (최대 20개 표시)`);
+    unmatchedSamples.slice(0, 20).forEach((s) => {
+      console.log({
+        index: s.index,
+        excel_addr: s.excel,
+        normalized_excel: s.normalizedExcel,
+        example_cache_key: s.exampleCacheKey,
+      });
+    });
+    console.groupEnd();
+  }
+
+  // ✅ geoCache와 Excel 주소 간 공통 prefix 분석
+  const excelPrefix = data[0]?.["주소"]?.split(" ")[0];
+  const cachePrefix = Object.keys(geoCache)[0]?.split(" ")[0];
+  if (excelPrefix && cachePrefix) {
+    console.log(`[DEBUG][GEO] Excel 주소 시작: ${excelPrefix}`);
+    console.log(`[DEBUG][GEO] geoCache 키 시작: ${cachePrefix}`);
+    if (excelPrefix !== cachePrefix)
+      console.warn(
+        `⚠️ [DEBUG][GEO] 행정구 단위가 다름 — '${excelPrefix}' vs '${cachePrefix}'`
+      );
+  }
 
   setData(matchedData);
 }, [geoCache]);
