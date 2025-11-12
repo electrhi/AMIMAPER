@@ -613,24 +613,39 @@ const renderMarkers = async () => {
 };
 
 
-  /** ✅ 마커 렌더링 자동 트리거 — map + data + geoCache 모두 준비된 뒤 실행 **/
+/** ✅ 마커 렌더링 자동 트리거 (지도, 데이터, geoCache 모두 준비된 뒤 1회 실행 보장) **/
 useEffect(() => {
-  if (!map) {
-    console.log("[DEBUG][MAP] ⏳ 지도 아직 로드 안됨");
-    return;
-  }
-  if (!data || data.length === 0) {
-    console.log("[DEBUG][MAP] ⏳ 데이터 아직 없음");
-    return;
-  }
-  if (!geoCache || Object.keys(geoCache).length === 0) {
-    console.log("[DEBUG][MAP] ⏳ 캐시 아직 없음");
-    return;
-  }
+  let checkCount = 0;
+  const maxWait = 40; // 최대 40회 (약 4초)
 
-  console.log("[DEBUG][MAP] ✅ 지도+데이터+캐시 준비 완료 → 마커 렌더링 실행");
-  renderMarkers();
+  const waitForReady = async () => {
+    checkCount++;
+    const ready =
+      map instanceof window.kakao.maps.Map &&
+      data.length > 0 &&
+      Object.keys(geoCache).length > 0;
+
+    if (!ready) {
+      if (checkCount <= maxWait) {
+        console.log(
+          `[DEBUG][MAP] ⏳ 준비 대기중 (${checkCount}/${maxWait}) → map:${
+            !!map
+          }, data:${data.length}, geoCache:${Object.keys(geoCache).length}`
+        );
+        return setTimeout(waitForReady, 100);
+      } else {
+        console.warn("[DEBUG][MAP] ⚠️ 지도 또는 데이터 준비 지연으로 렌더 스킵");
+        return;
+      }
+    }
+
+    console.log("[DEBUG][MAP] ✅ 모든 요소 준비 완료 → 마커 렌더링 실행");
+    await renderMarkers();
+  };
+
+  waitForReady();
 }, [map, data, geoCache]);
+
 
 
   /** 상태 업데이트 **/
