@@ -350,29 +350,33 @@ useEffect(() => {
 
   console.log("[DEBUG][GEO] 🔄 geoCache 매칭 시작 (최초 1회)");
 
-  // ✅ 공백 정리 & 안전 매칭
+  // ✅ 안전한 문자열 정규화 함수
+  const normalize = (str) =>
+    str
+      ?.toString()
+      .trim()
+      .replace(/\s+/g, " ")
+      .replace(/\u3000/g, " ") // 전각 공백
+      .replace(/\r|\n|\t/g, ""); // 줄바꿈/탭 제거
+
   const matchedData = data.map((row) => {
-    const addr = row["주소"]?.trim()?.replace(/\s+/g, " ");
+    const addr = normalize(row["주소"]);
     if (!addr) return { ...row, lat: null, lng: null };
 
-    // ✅ 다양한 패턴으로 geoCache에서 탐색 (공백/유사 문자열 대응)
-    const cached =
-      geoCache[addr] ||
-      geoCache[`${addr} `] ||
-      geoCache[` ${addr}`] ||
-      Object.entries(geoCache).find(
-        ([k]) => k.replace(/\s+/g, "") === addr.replace(/\s+/g, "")
-      )?.[1];
+    // ✅ geoCache의 키도 미리 정규화해서 비교
+    const cachedEntry = Object.entries(geoCache).find(
+      ([k]) => normalize(k) === addr
+    );
 
-    if (cached && cached.lat && cached.lng) {
+    if (cachedEntry && cachedEntry[1]?.lat && cachedEntry[1]?.lng) {
+      const cached = cachedEntry[1];
       return {
         ...row,
         lat: parseFloat(cached.lat),
         lng: parseFloat(cached.lng),
       };
-    } else {
-      return { ...row, lat: null, lng: null };
     }
+    return { ...row, lat: null, lng: null };
   });
 
   const validCount = matchedData.filter((d) => d.lat && d.lng).length;
@@ -383,9 +387,7 @@ useEffect(() => {
   setData(matchedData);
 }, [geoCache]);
 
-  
 
- /** 마커 렌더링 **/
 /** 마커 렌더링 **/
 const renderMarkers = async () => {
   try {
