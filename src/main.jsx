@@ -613,13 +613,24 @@ const renderMarkers = async () => {
 };
 
 
-/** ✅ 마커 렌더링 자동 트리거 (지도, 데이터, geoCache 모두 준비된 뒤 1회 실행 보장) **/
+/** ✅ 마커 렌더링 자동 트리거 (지도, 데이터, geoCache 모두 준비된 뒤 1회 실행 보장 + Kakao SDK 안전 대기) **/
 useEffect(() => {
   let checkCount = 0;
-  const maxWait = 40; // 최대 40회 (약 4초)
+  const maxWait = 50; // 최대 5초까지 대기
 
   const waitForReady = async () => {
     checkCount++;
+
+    // ✅ Kakao SDK 로드 확인
+    if (typeof window.kakao === "undefined" || !window.kakao.maps) {
+      console.log(
+        `[DEBUG][MAP] ⚙️ Kakao SDK 아직 로드 안됨 (${checkCount}/${maxWait})`
+      );
+      if (checkCount < maxWait) return setTimeout(waitForReady, 100);
+      console.warn("[DEBUG][MAP] ❌ Kakao SDK 로드 실패로 렌더링 중단");
+      return;
+    }
+
     const ready =
       map instanceof window.kakao.maps.Map &&
       data.length > 0 &&
