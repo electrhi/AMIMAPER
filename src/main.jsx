@@ -198,7 +198,14 @@ useEffect(() => {
       const sampleKeys = Object.keys(parsed).slice(0, 5);
       console.log("[DEBUG][CACHE] 🔍 샘플 키 5개:", sampleKeys);
 
-      setGeoCache(parsed);
+      // ✅ 캐시 키 공백 정리 (정규화)
+      const cleanedCache = {};
+      Object.entries(parsed).forEach(([k, v]) => {
+        const cleanKey = k.trim().replace(/\s+/g, " ");
+        cleanedCache[cleanKey] = v;
+      });
+      setGeoCache(cleanedCache);
+
       setTimeout(() => renderMarkers(), 800);
     } catch (err) {
       console.error("[ERROR][CACHE] 캐시 로드 실패:", err.message);
