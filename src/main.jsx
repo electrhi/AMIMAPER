@@ -343,7 +343,7 @@ const renderMarkersPartial = (coords, newStatus) => {
   console.log(`[DEBUG][MAP] 🟢 반경 1km 내 ${updatedCount}개 마커 색상만 변경`);
 };
 
-/** ✅ geoCache 매칭 최초 1회 + 확장 유사매칭 + 디버그 **/
+/** ✅ geoCache 매칭 최초 1회 + 확장 유사매칭 + 디버그 (수정완성본) **/
 useEffect(() => {
   if (!geoCache || Object.keys(geoCache).length === 0) return;
   if (!data || data.length === 0) return;
@@ -357,8 +357,8 @@ useEffect(() => {
       .replace(/\s+/g, " ")
       .replace(/\u3000/g, " ")
       .replace(/\r|\n|\t/g, "")
-      .replace("번지", "")
-      .replace(" ", "");
+      .replace(/번지/g, "")
+      .replace(/ /g, ""); // ✅ 모든 공백 완전 제거
 
   // ✅ 캐시 키 정규화 미리 준비
   const normalizedCacheEntries = Object.entries(geoCache).map(([k, v]) => [
@@ -377,40 +377,35 @@ useEffect(() => {
     const exact = normalizedCacheEntries.find(([key]) => key === addr);
     if (exact) {
       matchedCount++;
-      return {
-        ...row,
-        lat: parseFloat(exact[1].lat),
-        lng: parseFloat(exact[1].lng),
-      };
+      return { ...row, lat: parseFloat(exact[1].lat), lng: parseFloat(exact[1].lng) };
     }
 
     // ✅ 2단계: 부분 포함 (좌우 포함 탐색)
-    const partial = normalizedCacheEntries.find(([key]) => key.includes(addr) || addr.includes(key));
+    const partial = normalizedCacheEntries.find(
+      ([key]) => key.includes(addr) || addr.includes(key)
+    );
     if (partial) {
       matchedCount++;
-      return {
-        ...row,
-        lat: parseFloat(partial[1].lat),
-        lng: parseFloat(partial[1].lng),
-      };
+      return { ...row, lat: parseFloat(partial[1].lat), lng: parseFloat(partial[1].lng) };
     }
 
-    // ✅ 3단계: 비슷한 문자열 (예: 대덕 vs 유성)
+    // ✅ 3단계: 비슷한 문자열 (예: 대덕 ↔ 유성)
+    const parts = addr.split(" ");
+    const dongName = parts[2] || parts[1] || parts[0]; // 유연 대응
     const similar = normalizedCacheEntries.find(([key]) => {
-      const sameDong = key.includes(addr.split(" ")[2] || "");
-      return sameDong && key.slice(-5) === addr.slice(-5);
+      return key.includes(dongName) && key.slice(-5) === addr.slice(-5);
     });
     if (similar) {
       matchedCount++;
-      return {
-        ...row,
-        lat: parseFloat(similar[1].lat),
-        lng: parseFloat(similar[1].lng),
-      };
+      return { ...row, lat: parseFloat(similar[1].lat), lng: parseFloat(similar[1].lng) };
     }
 
+    // ✅ 매칭 실패 샘플 기록
     if (failedSamples.length < 15) {
-      failedSamples.push({ excel: row["주소"], sampleKey: normalizedCacheEntries[idx]?.[0] });
+      failedSamples.push({
+        excel: row["주소"],
+        exampleCacheKey: normalizedCacheEntries[idx]?.[0],
+      });
     }
 
     return { ...row, lat: null, lng: null };
