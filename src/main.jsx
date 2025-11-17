@@ -845,7 +845,7 @@ function App() {
                 marginBottom: "6px",
               }}
             >
-              계량기 지도 로그인
+              AMI 시공 대상 지도
             </div>
             <div
               style={{
