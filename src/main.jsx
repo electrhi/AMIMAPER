@@ -130,7 +130,7 @@ function App() {
     const loadGeoCache = async () => {
       try {
         console.log(`[DEBUG][CACHE] 📦 캐시 불러오기 시도: ${GEO_CACHE_FILE}`);
-        // ❗ Supabase Storage 객체 이름 그대로 사용 (쿼리스트링 제거)
+        // Supabase Storage 객체 이름 그대로 사용
         const { data: cacheBlob, error } = await supabase.storage
           .from("excels")
           .download(GEO_CACHE_FILE);
@@ -343,7 +343,6 @@ function App() {
     const failedSamples = [];
 
     const matchedData = data.map((row, idx) => {
-      // ❗ 기존 row["주소"] → row.address 로 수정
       const addr = normalize(row.address);
       if (!addr) return { ...row, lat: null, lng: null };
 
@@ -533,6 +532,7 @@ function App() {
 
           const popupEl = document.createElement("div");
           popupEl.style.cssText = `
+            position: relative;
             background:white;
             padding:10px;
             border:1px solid #ccc;
@@ -540,6 +540,30 @@ function App() {
             width:230px;
             box-shadow:0 2px 8px rgba(0,0,0,0.2);
           `;
+
+          // ✕ 닫기 버튼
+          const closeBtn = document.createElement("button");
+          closeBtn.textContent = "✕";
+          closeBtn.style.cssText = `
+            position:absolute;
+            top:4px;
+            right:4px;
+            border:none;
+            background:transparent;
+            font-size:14px;
+            cursor:pointer;
+          `;
+          closeBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const ov = getActiveOverlay();
+            if (ov) {
+              ov.setMap(null);
+              setActiveOverlay(null);
+              activeOverlay = null;
+              console.log("[DEBUG][POPUP] ✕ 버튼 클릭 — 팝업 닫힘");
+            }
+          });
+          popupEl.appendChild(closeBtn);
 
           const title = document.createElement("b");
           title.textContent = list[0].address;
@@ -590,7 +614,7 @@ function App() {
           const popupOverlay = new window.kakao.maps.CustomOverlay({
             position: kakaoCoord,
             content: popupEl,
-            yAnchor: 1.5,
+            yAnchor: 1.1, // 마커 바로 위에 가깝게 위치
             zIndex: 10000,
           });
           popupOverlay.setMap(map);
