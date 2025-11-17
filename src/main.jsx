@@ -130,7 +130,6 @@ function App() {
     const loadGeoCache = async () => {
       try {
         console.log(`[DEBUG][CACHE] 📦 캐시 불러오기 시도: ${GEO_CACHE_FILE}`);
-        // Supabase Storage 객체 이름 그대로 사용
         const { data: cacheBlob, error } = await supabase.storage
           .from("excels")
           .download(GEO_CACHE_FILE);
@@ -814,24 +813,141 @@ function App() {
   /** 로그인 UI **/
   if (!loggedIn)
     return (
-      <div style={{ textAlign: "center", marginTop: "100px" }}>
-        <h2>로그인</h2>
-        <form onSubmit={handleLogin}>
-          <input
-            value={user}
-            onChange={(e) => setUser(e.target.value)}
-            placeholder="아이디"
-          />
-          <br />
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="비밀번호"
-          />
-          <br />
-          <button type="submit">로그인</button>
-        </form>
+      <div
+        style={{
+          height: "100vh",
+          width: "100vw",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          background:
+            "linear-gradient(135deg, #2c3e50 0%, #4ca1af 50%, #2c3e50 100%)",
+          fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+        }}
+      >
+        <div
+          style={{
+            width: "320px",
+            padding: "28px 26px 24px",
+            borderRadius: "16px",
+            background: "rgba(255,255,255,0.96)",
+            boxShadow: "0 14px 45px rgba(0,0,0,0.25)",
+            border: "1px solid rgba(255,255,255,0.7)",
+            backdropFilter: "blur(10px)",
+          }}
+        >
+          <div style={{ marginBottom: "18px", textAlign: "center" }}>
+            <div
+              style={{
+                fontSize: "22px",
+                fontWeight: 700,
+                color: "#222",
+                marginBottom: "6px",
+              }}
+            >
+              계량기 지도 로그인
+            </div>
+            <div
+              style={{
+                fontSize: "12px",
+                color: "#777",
+              }}
+            >
+              아이디와 비밀번호를 입력해주세요
+            </div>
+          </div>
+
+          <form onSubmit={handleLogin}>
+            <div style={{ marginBottom: "10px" }}>
+              <label
+                style={{
+                  display: "block",
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  color: "#444",
+                  marginBottom: "4px",
+                }}
+              >
+                아이디
+              </label>
+              <input
+                value={user}
+                onChange={(e) => setUser(e.target.value)}
+                placeholder="아이디를 입력하세요"
+                style={{
+                  width: "100%",
+                  padding: "9px 10px",
+                  borderRadius: "8px",
+                  border: "1px solid #d0d7de",
+                  fontSize: "13px",
+                  outline: "none",
+                  boxSizing: "border-box",
+                }}
+                onFocus={(e) =>
+                  (e.target.style.borderColor = "#4a90e2")
+                }
+                onBlur={(e) =>
+                  (e.target.style.borderColor = "#d0d7de")
+                }
+              />
+            </div>
+
+            <div style={{ marginBottom: "14px" }}>
+              <label
+                style={{
+                  display: "block",
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  color: "#444",
+                  marginBottom: "4px",
+                }}
+              >
+                비밀번호
+              </label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="비밀번호를 입력하세요"
+                style={{
+                  width: "100%",
+                  padding: "9px 10px",
+                  borderRadius: "8px",
+                  border: "1px solid #d0d7de",
+                  fontSize: "13px",
+                  outline: "none",
+                  boxSizing: "border-box",
+                }}
+                onFocus={(e) =>
+                  (e.target.style.borderColor = "#4a90e2")
+                }
+                onBlur={(e) =>
+                  (e.target.style.borderColor = "#d0d7de")
+                }
+              />
+            </div>
+
+            <button
+              type="submit"
+              style={{
+                width: "100%",
+                marginTop: "4px",
+                padding: "10px 0",
+                borderRadius: "999px",
+                border: "none",
+                background:
+                  "linear-gradient(135deg, #4a90e2 0%, #007bff 100%)",
+                color: "white",
+                fontWeight: 700,
+                fontSize: "14px",
+                cursor: "pointer",
+                boxShadow: "0 6px 15px rgba(0,123,255,0.35)",
+              }}
+            >
+              로그인
+            </button>
+          </form>
+        </div>
       </div>
     );
 
