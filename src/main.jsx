@@ -30,7 +30,7 @@ function App() {
   const getActiveOverlay = () => window.__activeOverlayRef || null;
   const setActiveOverlay = (ov) => (window.__activeOverlayRef = ov);
 
-  /** 로그인 **/
+  /** 🔐 수동 로그인 처리 **/
   const handleLogin = async (e) => {
     e.preventDefault();
     console.log("[DEBUG][LOGIN] 로그인 시도:", user);
@@ -48,6 +48,15 @@ function App() {
     if (users && users.length > 0 && users[0].password === password) {
       const userData = users[0];
       console.log("[DEBUG][LOGIN] ✅ 로그인 성공:", userData);
+
+      // ✅ 로컬에 user id 저장 → 다음 접속 시 자동 로그인에 사용
+      try {
+        localStorage.setItem("amimap_user_id", userData.id);
+        console.log("[DEBUG][AUTH] 로컬스토리지에 사용자 ID 저장:", userData.id);
+      } catch (err) {
+        console.warn("[WARN][AUTH] 로컬스토리지 저장 실패:", err?.message);
+      }
+
       setCurrentUser(userData);
       await loadData(userData.data_file);
       setLoggedIn(true);
@@ -56,6 +65,62 @@ function App() {
       alert("로그인 실패");
     }
   };
+
+  /** 🔐 앱 시작 시 자동 로그인 시도 **/
+  useEffect(() => {
+    const autoLogin = async () => {
+      if (loggedIn) {
+        console.log("[DEBUG][AUTH] 이미 로그인 상태 — 자동 로그인 스킵");
+        return;
+      }
+
+      let savedId = null;
+      try {
+        savedId = localStorage.getItem("amimap_user_id");
+      } catch (err) {
+        console.warn("[WARN][AUTH] 로컬스토리지 접근 실패:", err?.message);
+      }
+
+      if (!savedId) {
+        console.log("[DEBUG][AUTH] 저장된 사용자 ID 없음 — 자동 로그인 안 함");
+        return;
+      }
+
+      console.log("[DEBUG][AUTH] 자동 로그인 시도 — 저장된 ID:", savedId);
+
+      const { data: users, error } = await supabase
+        .from("users")
+        .select("*")
+        .eq("id", savedId);
+
+      if (error) {
+        console.error(
+          "[ERROR][AUTH] 자동 로그인 중 Supabase 오류:",
+          error.message
+        );
+        return;
+      }
+
+      if (!users || users.length === 0) {
+        console.warn(
+          "[WARN][AUTH] 저장된 ID에 해당하는 사용자를 찾지 못함 → 로컬 정보 제거"
+        );
+        try {
+          localStorage.removeItem("amimap_user_id");
+        } catch {}
+        return;
+      }
+
+      const userData = users[0];
+      console.log("[DEBUG][AUTH] ✅ 자동 로그인 사용자 데이터:", userData);
+
+      setCurrentUser(userData);
+      await loadData(userData.data_file);
+      setLoggedIn(true);
+    };
+
+    autoLogin();
+  }, [loggedIn]);
 
   /** Excel 데이터 로드 **/
   const loadData = async (fileName) => {
@@ -822,7 +887,8 @@ function App() {
           justifyContent: "center",
           background:
             "linear-gradient(135deg, #2c3e50 0%, #4ca1af 50%, #2c3e50 100%)",
-          fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+          fontFamily:
+            "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
         }}
       >
         <div
@@ -845,7 +911,7 @@ function App() {
                 marginBottom: "6px",
               }}
             >
-              AMI 시공 대상 지도
+              계량기 지도 로그인
             </div>
             <div
               style={{
@@ -883,12 +949,8 @@ function App() {
                   outline: "none",
                   boxSizing: "border-box",
                 }}
-                onFocus={(e) =>
-                  (e.target.style.borderColor = "#4a90e2")
-                }
-                onBlur={(e) =>
-                  (e.target.style.borderColor = "#d0d7de")
-                }
+                onFocus={(e) => (e.target.style.borderColor = "#4a90e2")}
+                onBlur={(e) => (e.target.style.borderColor = "#d0d7de")}
               />
             </div>
 
@@ -918,12 +980,8 @@ function App() {
                   outline: "none",
                   boxSizing: "border-box",
                 }}
-                onFocus={(e) =>
-                  (e.target.style.borderColor = "#4a90e2")
-                }
-                onBlur={(e) =>
-                  (e.target.style.borderColor = "#d0d7de")
-                }
+                onFocus={(e) => (e.target.style.borderColor = "#4a90e2")}
+                onBlur={(e) => (e.target.style.borderColor = "#d0d7de")}
               />
             </div>
 
