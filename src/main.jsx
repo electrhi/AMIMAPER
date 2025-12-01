@@ -568,9 +568,9 @@ function App() {
         markerEl.style.cssText = `
           background:${color};
           border-radius:50%;
-          width:30px;height:30px;
-          color:white;font-size:12px;
-          line-height:30px;text-align:center;
+          width:21px;height:21px;
+          color:white;font-size:11px;
+          line-height:21px;text-align:center;
           box-shadow:0 0 5px rgba(0,0,0,0.4);
           cursor:pointer;
         `;
@@ -635,10 +635,18 @@ function App() {
           popupEl.appendChild(document.createElement("br"));
           popupEl.appendChild(document.createElement("br"));
 
-          const allIds = list.map((g) => g.meter_id);
-          const duplicates = allIds.filter(
-            (id, i) => allIds.indexOf(id) !== i
-          );
+                    // 하나의 마커에 포함된 모든 계기번호
+          const allIds = list.map((g) => String(g.meter_id || ""));
+
+          // ✅ 계기번호 뒤 2자리 기준으로 중복 개수 계산
+          const suffixCount = {};
+          allIds.forEach((id) => {
+            const suffix = id.slice(-2);
+            if (!suffix) return;
+            suffixCount[suffix] = (suffixCount[suffix] || 0) + 1;
+          });
+
+          // 중복 제거한 계기번호 목록
           const uniqueMeters = Array.from(new Set(allIds));
 
           uniqueMeters.forEach((id) => {
@@ -646,9 +654,16 @@ function App() {
             const mid = id.substring(2, 4);
             const type = meter_mapping[mid] || "확인필요";
             div.textContent = `${id} | ${type}`;
-            if (duplicates.includes(id)) div.style.color = "red";
+
+            // ✅ 뒤 2자리가 같은 계기번호들만 빨간색 처리
+            const suffix = id.slice(-2);
+            if (suffix && suffixCount[suffix] > 1) {
+              div.style.color = "red";
+            }
+
             popupEl.appendChild(div);
           });
+
 
           popupEl.appendChild(document.createElement("hr"));
 
