@@ -20,6 +20,9 @@ function App() {
   const otherUserOverlays = useRef([]);
   const [geoCache, setGeoCache] = useState({});
 
+  console.log("[DEBUG][SUPABASE_URL]", SUPABASE_URL);
+
+
   // 예: 데이터 파일이 "djdemo.xlsx" 라면 geoCache 파일명은 "geoCache_djdemo.xlsx.json"
   const GEO_CACHE_FILE = `geoCache_${currentUser?.data_file || "default"}.json`;
 
