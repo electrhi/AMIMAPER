@@ -8,11 +8,13 @@ const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_KEY;
 const KAKAO_KEY = import.meta.env.VITE_KAKAO_JAVASCRIPT_KEY;
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// ✅ 계기번호 공통 정규화 함수 (앞뒤/중간 공백 제거)
+// ✅ 계기번호 공통 정규화 함수 (모든 종류의 공백/제로폭문자 제거)
 const normalizeMeterId = (id) =>
   String(id ?? "")
-    .trim()
-    .replace(/\s+/g, "");
+    // 일반 공백 + 탭 + 줄바꿈 + NBSP(0xA0) + 제로폭 공백들 제거
+    .replace(/[\s\u00A0\u200B-\u200D\uFEFF]/g, "")
+    .trim();
+
 
 function App() {
   const [user, setUser] = useState("");
@@ -334,7 +336,8 @@ function App() {
       console.log(
         "[DEBUG][CHECK] fresh 중 25191769853:",
         fresh?.find(
-          (r) => normalizeMeterId(r.meter_id) === "25191769853"
+          (r) =>
+            normalizeMeterId(r.meter_id) === normalizeMeterId("25191769853")
         )
       );
 
