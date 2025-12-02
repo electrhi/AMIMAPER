@@ -141,7 +141,11 @@ function App() {
         meter_id: r["계기번호"],
         address: r["주소"],
         status: r["진행"] || "미방문",
+        // ✅ 새로 추가되는 컬럼들
+        comm_type: r["통신방식"] || "",   // 예: KS-PLC, LTE
+        list_no: r["리스트번호"] || "",   // 예: 5131, 5152
       }));
+
 
       const { data: dbData } = await supabase
         .from("meters")
@@ -635,13 +639,13 @@ function App() {
           popupEl.appendChild(document.createElement("br"));
           popupEl.appendChild(document.createElement("br"));
 
-                    // 하나의 마커에 포함된 모든 계기번호
+                  // 하나의 마커에 포함된 모든 계기번호 (문자열로 정규화)
           const allIds = list.map((g) => String(g.meter_id || ""));
 
           // ✅ 계기번호 뒤 2자리 기준으로 중복 개수 계산
           const suffixCount = {};
           allIds.forEach((id) => {
-            const suffix = id.slice(-2);
+            const suffix = id.slice(-2); // 맨 오른쪽 2자리
             if (!suffix) return;
             suffixCount[suffix] = (suffixCount[suffix] || 0) + 1;
           });
@@ -650,10 +654,18 @@ function App() {
           const uniqueMeters = Array.from(new Set(allIds));
 
           uniqueMeters.forEach((id) => {
-            const div = document.createElement("div");
+            // 이 계기번호에 해당하는 행 하나 찾아서 통신방식/리스트번호 가져오기
+            const row = list.find((g) => String(g.meter_id || "") === id) || {};
+
             const mid = id.substring(2, 4);
             const type = meter_mapping[mid] || "확인필요";
-            div.textContent = `${id} | ${type}`;
+
+            const listNo = row.list_no || "";
+            const commType = row.comm_type || "";
+
+            const div = document.createElement("div");
+            // ✅ 원하는 출력 형식: 리스트번호 | 통신방식 | 계기번호 | 계기타입
+            div.textContent = `${listNo} | ${commType} | ${id} | ${type}`;
 
             // ✅ 뒤 2자리가 같은 계기번호들만 빨간색 처리
             const suffix = id.slice(-2);
