@@ -151,6 +151,12 @@ function App() {
         .from("meters")
         .select("*")
         .order("updated_at", { ascending: false });
+      
+      // 🔍 특정 계량기(DB에서 보이는지 확인)
+      console.log(
+        "[DEBUG][CHECK] meters 중 25191769853:",
+        dbData?.find((r) => String(r.meter_id) === "25191769853")
+      );
 
       const latestMap = {};
       dbData?.forEach((d) => {
@@ -315,6 +321,12 @@ function App() {
         .select("*")
         .order("updated_at", { ascending: false });
       if (error) throw error;
+
+      // 🔍 최신 상태 재동기화에서도 같은 계량기 보이는지 확인
+      console.log(
+        "[DEBUG][CHECK] fresh 중 25191769853:",
+        fresh?.find((r) => String(r.meter_id) === "25191769853")
+      );
 
       const latestMap = {};
       fresh.forEach((r) => {
