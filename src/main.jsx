@@ -8,6 +8,12 @@ const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_KEY;
 const KAKAO_KEY = import.meta.env.VITE_KAKAO_JAVASCRIPT_KEY;
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
+// ✅ 계기번호 공통 정규화 함수 (앞뒤/중간 공백 제거)
+const normalizeMeterId = (id) =>
+  String(id ?? "")
+    .trim()
+    .replace(/\s+/g, "");
+
 function App() {
   const [user, setUser] = useState("");
   const [password, setPassword] = useState("");
@@ -21,7 +27,6 @@ function App() {
   const [geoCache, setGeoCache] = useState({});
 
   console.log("[DEBUG][SUPABASE_URL]", SUPABASE_URL);
-
 
   // 예: 데이터 파일이 "djdemo.xlsx" 라면 geoCache 파일명은 "geoCache_djdemo.xlsx.json"
   const GEO_CACHE_FILE = `geoCache_${currentUser?.data_file || "default"}.json`;
@@ -140,12 +145,12 @@ function App() {
       const json = XLSX.utils.sheet_to_json(sheet);
       console.log("[DEBUG][DATA] 📊 엑셀 데이터:", json.length, "행");
 
-            // 1) 엑셀에서는 상태(status)를 더 이상 쓰지 않음
+      // 1) 엑셀에서는 상태(status)를 더 이상 쓰지 않음
       const baseData = json.map((r) => ({
-        meter_id: r["계기번호"],
+        meter_id: normalizeMeterId(r["계기번호"]),
         address: r["주소"],
-        comm_type: r["통신방식"] || "",   // 예: KS-PLC, LTE
-        list_no: r["리스트번호"] || "",   // 예: 5131, 5152
+        comm_type: r["통신방식"] || "", // 예: KS-PLC, LTE
+        list_no: r["리스트번호"] || "", // 예: 5131, 5152
       }));
 
       // 2) DB에서 최신 상태 전부 읽어오기
@@ -156,12 +161,14 @@ function App() {
 
       const latestMap = {};
       dbData?.forEach((d) => {
-        if (!latestMap[d.meter_id]) latestMap[d.meter_id] = d;
+        const key = normalizeMeterId(d.meter_id);
+        if (!latestMap[key]) latestMap[key] = d;
       });
 
       // 3) 상태는 "DB 값 > 없으면 미방문" 이라는 한 가지 규칙만 사용
       const merged = baseData.map((x) => {
-        const m = latestMap[x.meter_id];
+        const key = normalizeMeterId(x.meter_id);
+        const m = latestMap[key];
         return {
           ...x,
           status: m?.status || "미방문",
@@ -170,7 +177,6 @@ function App() {
 
       setData(merged);
 
-      
       console.log("[DEBUG][DATA] ✅ 병합 완료:", merged.length);
       setTimeout(() => renderMarkers(), 400);
     } catch (e) {
@@ -190,7 +196,7 @@ function App() {
         const mapInstance = new window.kakao.maps.Map(
           document.getElementById("map"),
           {
-            center: new window.kakao.maps.LatLng(37.5665, 126.9780),
+            center: new window.kakao.maps.LatLng(37.5665, 126.978),
             level: 5,
           }
         );
@@ -324,21 +330,26 @@ function App() {
         .order("updated_at", { ascending: false });
       if (error) throw error;
 
-      // 🔍 최신 상태 재동기화에서도 같은 계량기 보이는지 확인
+      // 🔍 특정 계량기 확인 (정규화 기준)
       console.log(
         "[DEBUG][CHECK] fresh 중 25191769853:",
-        fresh?.find((r) => String(r.meter_id) === "25191769853")
+        fresh?.find(
+          (r) => normalizeMeterId(r.meter_id) === "25191769853"
+        )
       );
 
       const latestMap = {};
       fresh.forEach((r) => {
-        if (!latestMap[r.meter_id]) latestMap[r.meter_id] = r;
+        const key = normalizeMeterId(r.meter_id);
+        if (!latestMap[key]) latestMap[key] = r;
       });
-      const updated = data.map((d) =>
-        latestMap[d.meter_id]
-          ? { ...d, status: latestMap[d.meter_id].status }
-          : d
-      );
+
+      const updated = data.map((d) => {
+        const key = normalizeMeterId(d.meter_id);
+        return latestMap[key]
+          ? { ...d, status: latestMap[key].status }
+          : d;
+      });
 
       setData(updated);
       console.log("[DEBUG][SYNC] ✅ 최신 상태 반영 완료");
@@ -406,7 +417,7 @@ function App() {
 
     console.log("[DEBUG][GEO] 🔄 geoCache 매칭 시작 (유사 주소 매칭 포함)");
 
-    const normalize = (str) =>
+    const normalizeAddr = (str) =>
       str
         ?.toString()
         .trim()
@@ -417,7 +428,7 @@ function App() {
         .replace(/ /g, ""); // ✅ 모든 공백 완전 제거
 
     const normalizedCacheEntries = Object.entries(geoCache).map(([k, v]) => [
-      normalize(k),
+      normalizeAddr(k),
       v,
     ]);
 
@@ -425,7 +436,7 @@ function App() {
     const failedSamples = [];
 
     const matchedData = data.map((row, idx) => {
-      const addr = normalize(row.address);
+      const addr = normalizeAddr(row.address);
       if (!addr) return { ...row, lat: null, lng: null };
 
       // 1단계: 완전 일치
@@ -653,7 +664,7 @@ function App() {
           popupEl.appendChild(document.createElement("br"));
           popupEl.appendChild(document.createElement("br"));
 
-                  // 하나의 마커에 포함된 모든 계기번호 (문자열로 정규화)
+          // 하나의 마커에 포함된 모든 계기번호 (문자열로 정규화)
           const allIds = list.map((g) => String(g.meter_id || ""));
 
           // ✅ 계기번호 뒤 2자리 기준으로 중복 개수 계산
@@ -669,7 +680,8 @@ function App() {
 
           uniqueMeters.forEach((id) => {
             // 이 계기번호에 해당하는 행 하나 찾아서 통신방식/리스트번호 가져오기
-            const row = list.find((g) => String(g.meter_id || "") === id) || {};
+            const row =
+              list.find((g) => String(g.meter_id || "") === id) || {};
 
             const mid = id.substring(2, 4);
             const type = meter_mapping[mid] || "확인필요";
@@ -689,7 +701,6 @@ function App() {
 
             popupEl.appendChild(div);
           });
-
 
           popupEl.appendChild(document.createElement("hr"));
 
@@ -792,15 +803,22 @@ function App() {
         newStatus
       );
 
-      const payload = meterIds.map((id) => ({
-        meter_id: id,
-        address: data.find((d) => d.meter_id === id)?.address || "",
-        status: newStatus,
-        user_id: currentUser.id,
-        lat: parseFloat(coords.lat),
-        lng: parseFloat(coords.lng),
-        updated_at: new Date().toISOString(),
-      }));
+      const payload = meterIds.map((id) => {
+        const normId = normalizeMeterId(id);
+        const row =
+          data.find(
+            (d) => normalizeMeterId(d.meter_id) === normId
+          ) || {};
+        return {
+          meter_id: normId,
+          address: row.address || "",
+          status: newStatus,
+          user_id: currentUser.id,
+          lat: parseFloat(coords.lat),
+          lng: parseFloat(coords.lng),
+          updated_at: new Date().toISOString(),
+        };
+      });
 
       const { error: upsertError } = await supabase.from("meters").upsert(
         payload,
