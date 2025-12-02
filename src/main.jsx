@@ -140,38 +140,37 @@ function App() {
       const json = XLSX.utils.sheet_to_json(sheet);
       console.log("[DEBUG][DATA] 📊 엑셀 데이터:", json.length, "행");
 
+            // 1) 엑셀에서는 상태(status)를 더 이상 쓰지 않음
       const baseData = json.map((r) => ({
         meter_id: r["계기번호"],
         address: r["주소"],
-        status: r["진행"] || "미방문",
-        // ✅ 새로 추가되는 컬럼들
         comm_type: r["통신방식"] || "",   // 예: KS-PLC, LTE
         list_no: r["리스트번호"] || "",   // 예: 5131, 5152
       }));
 
-
+      // 2) DB에서 최신 상태 전부 읽어오기
       const { data: dbData } = await supabase
         .from("meters")
         .select("*")
         .order("updated_at", { ascending: false });
-      
-      // 🔍 특정 계량기(DB에서 보이는지 확인)
-      console.log(
-        "[DEBUG][CHECK] meters 중 25191769853:",
-        dbData?.find((r) => String(r.meter_id) === "25191769853")
-      );
 
       const latestMap = {};
       dbData?.forEach((d) => {
         if (!latestMap[d.meter_id]) latestMap[d.meter_id] = d;
       });
 
+      // 3) 상태는 "DB 값 > 없으면 미방문" 이라는 한 가지 규칙만 사용
       const merged = baseData.map((x) => {
         const m = latestMap[x.meter_id];
-        return m ? { ...x, status: m.status } : x;
+        return {
+          ...x,
+          status: m?.status || "미방문",
+        };
       });
 
       setData(merged);
+
+      
       console.log("[DEBUG][DATA] ✅ 병합 완료:", merged.length);
       setTimeout(() => renderMarkers(), 400);
     } catch (e) {
