@@ -341,6 +341,24 @@ function App() {
         )
       );
 
+      // ====== 🔍 디버그: 2519로 시작하는 계량기 후보 전부 찍어보기 ======
+const candidates = fresh.filter((r) => {
+  const raw = String(r.meter_id ?? "");
+  return raw.includes("2519") || normalizeMeterId(raw).includes("25191769853");
+});
+
+console.log("[DEBUG][CHECK] 2519 포함하는 후보 개수:", candidates.length);
+
+candidates.forEach((r, idx) => {
+  const raw = String(r.meter_id ?? "");
+  console.log(
+    `[DEBUG][CHECK] 후보${idx} raw='${raw}' charCodes=`,
+    Array.from(raw).map((ch) => ch.charCodeAt(0))
+  );
+});
+// =============================================================
+
+
       const latestMap = {};
       fresh.forEach((r) => {
         const key = normalizeMeterId(r.meter_id);
