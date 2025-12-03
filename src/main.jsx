@@ -651,7 +651,7 @@ candidates.forEach((r, idx) => {
             padding:10px;
             border:1px solid #ccc;
             border-radius:8px;
-            width:280px;
+            width:230px;
             box-shadow:0 2px 8px rgba(0,0,0,0.2);
             font-size:12px;
           `;
