@@ -874,50 +874,67 @@ candidates.forEach((r, idx) => {
 
   /** 관리자 모드: 다른 사용자 위치 불러오기 **/
   const loadOtherUserLocations = async () => {
-    if (!map) return;
-    otherUserOverlays.current.forEach((ov) => ov.setMap(null));
-    otherUserOverlays.current = [];
+  if (!map) return;
 
-    const { data: logs, error } = await supabase
-      .from("meters")
-      .select("address, lat, lng, status, user_id, updated_at")
-      .not("user_id", "is", null)
-      .order("updated_at", { ascending: false });
+  // 기존 관리자 오버레이 제거
+  otherUserOverlays.current.forEach((ov) => ov.setMap(null));
+  otherUserOverlays.current = [];
 
-    if (error) throw error;
+  const { data: logs, error } = await supabase
+    .from("meters")
+    .select("address, lat, lng, status, user_id, updated_at")
+    .not("user_id", "is", null)
+    .order("updated_at", { ascending: false });
 
-    const latest = {};
-    logs.forEach((l) => {
-      if (!l.user_id || !l.lat || !l.lng) return;
-      if (!latest[l.user_id]) latest[l.user_id] = l;
+  if (error) throw error;
+
+  const latest = {};
+  logs.forEach((l) => {
+    if (!l.user_id || !l.lat || !l.lng) return;
+    if (!latest[l.user_id]) latest[l.user_id] = l;
+  });
+
+  Object.keys(latest).forEach((uid) => {
+    const loc = latest[uid];
+    const coord = new window.kakao.maps.LatLng(loc.lat, loc.lng);
+
+    const markerEl = document.createElement("div");
+    markerEl.style.cssText = `
+      background:purple;
+      border-radius:8px;
+      padding:4px 7px;
+      color:white;
+      font-weight:bold;
+      font-size:11px;
+      box-shadow:0 0 6px rgba(0,0,0,0.4);
+      text-shadow:0 0 3px black;
+      cursor:pointer;          /* 👉 클릭 가능 느낌 */
+    `;
+    markerEl.textContent = uid;
+
+    // 👉 이름(보라색 박스) 클릭하면 해당 위치로 카카오 길찾기
+    markerEl.addEventListener("click", (e) => {
+      e.stopPropagation();
+
+      const label = loc.address || uid; // 주소가 있으면 주소, 없으면 유저ID
+
+      const url = `https://map.kakao.com/link/to/${encodeURIComponent(
+        label
+      )},${loc.lat},${loc.lng}`;
+
+      window.open(url, "_blank");
     });
 
-    Object.keys(latest).forEach((uid) => {
-      const loc = latest[uid];
-      const coord = new window.kakao.maps.LatLng(loc.lat, loc.lng);
-
-      const markerEl = document.createElement("div");
-      markerEl.style.cssText = `
-        background:purple;
-        border-radius:8px;
-        padding:4px 7px;
-        color:white;
-        font-weight:bold;
-        font-size:11px;
-        box-shadow:0 0 6px rgba(0,0,0,0.4);
-        text-shadow:0 0 3px black;
-      `;
-      markerEl.textContent = uid;
-
-      const overlay = new window.kakao.maps.CustomOverlay({
-        position: coord,
-        content: markerEl,
-        yAnchor: 2.5,
-      });
-      overlay.setMap(map);
-      otherUserOverlays.current.push(overlay);
+    const overlay = new window.kakao.maps.CustomOverlay({
+      position: coord,
+      content: markerEl,
+      yAnchor: 2.5,
     });
-  };
+    overlay.setMap(map);
+    otherUserOverlays.current.push(overlay);
+  });
+};
+
 
   /** 내 위치 마커 **/
   useEffect(() => {
