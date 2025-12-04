@@ -27,6 +27,10 @@ function App() {
   const [mapType, setMapType] = useState("ROADMAP");
   const otherUserOverlays = useRef([]);
   const [geoCache, setGeoCache] = useState({});
+  // 🔹 주소 라벨 오버레이들 저장
+  const addressOverlaysRef = useRef([]);
+  // 🔹 이 레벨 이하에서만 주소 라벨을 보여준다 (값은 취향대로 조절)
+  const LABEL_SHOW_LEVEL = 5;
 
   console.log("[DEBUG][SUPABASE_URL]", SUPABASE_URL);
 
@@ -536,6 +540,10 @@ candidates.forEach((r, idx) => {
       markers.forEach((m) => m.setMap(null));
       markers = [];
 
+      // 🔹 기존 주소 라벨 제거
+      addressOverlaysRef.current.forEach((ov) => ov.setMap(null));
+      addressOverlaysRef.current = [];
+
       const grouped = {};
       const statusCount = { 완료: 0, 불가: 0, 미방문: 0 };
 
@@ -634,6 +642,34 @@ candidates.forEach((r, idx) => {
         overlay.setMap(map);
         markers.push(overlay);
         markerCount++;
+
+          // 🔹 현재 지도 레벨 기준으로 라벨 표시 여부 결정
+      const currentLevel = map.getLevel();
+      const showLabel = currentLevel <= LABEL_SHOW_LEVEL;
+
+      // 🔹 주소 라벨용 엘리먼트
+      const labelEl = document.createElement("div");
+      labelEl.style.cssText = `
+        background: rgba(255,255,255,0.9);
+        border-radius: 4px;
+        padding: 2px 4px;
+        border: 1px solid #ddd;
+        font-size: 11px;
+        white-space: nowrap;
+        transform: translateY(-4px);
+      `;
+      labelEl.textContent = list[0].address; // 첫 번째 주소 사용
+
+      const labelOverlay = new window.kakao.maps.CustomOverlay({
+        position: kakaoCoord,
+        content: labelEl,
+        yAnchor: 1.7, // 마커 조금 위쪽에 표시
+        zIndex: 5,
+      });
+
+      // 🔹 레벨 조건에 따라 처음 렌더 시 보이거나 숨기기
+      labelOverlay.setMap(showLabel ? map : null);
+      addressOverlaysRef.current.push(labelOverlay);
 
         // 마커 클릭 시 팝업 + 상태 버튼
         const openPopup = async (e) => {
@@ -814,6 +850,28 @@ candidates.forEach((r, idx) => {
 
     waitForReady();
   }, [map, data, geoCache]);
+
+    // 🔹 줌 레벨에 따라 주소 라벨 토글
+  useEffect(() => {
+    if (!map || typeof window.kakao === "undefined") return;
+
+    const handler = () => {
+      const level = map.getLevel();
+      const show = level <= LABEL_SHOW_LEVEL;
+
+      addressOverlaysRef.current.forEach((ov) => {
+        ov.setMap(show ? map : null);
+      });
+    };
+
+    window.kakao.maps.event.addListener(map, "zoom_changed", handler);
+
+    // cleanup
+    return () => {
+      window.kakao.maps.event.removeListener(map, "zoom_changed", handler);
+    };
+  }, [map]);
+
 
   /** 상태 업데이트 (버튼 클릭 시만 DB 업로드) **/
   const updateStatus = async (meterIds, newStatus, coords) => {
