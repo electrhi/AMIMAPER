@@ -1032,12 +1032,12 @@ candidates.forEach((r, idx) => {
       // 🔴 빨간 원 엘리먼트 생성
       const markerEl = document.createElement("div");
       markerEl.style.cssText = `
-        width: 18px;
-        height: 18px;
+        width: 10px;
+        height: 10px;
         border-radius: 50%;
         background: red;
-        border: 3px solid white;
-        box-shadow: 0 0 8px rgba(255,0,0,0.8);
+        border: 2px solid white;
+        box-shadow: 0 0 4px rgba(255,0,0,0.8);
       `;
 
       const overlay = new window.kakao.maps.CustomOverlay({
