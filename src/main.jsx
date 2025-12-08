@@ -32,6 +32,10 @@ function App() {
   // 🔹 이 레벨 이하에서만 주소 라벨을 보여준다 (값은 취향대로 조절)
   const LABEL_SHOW_LEVEL = 5;
 
+    // 🔴 내 위치 오버레이 & watchId
+  const myLocationOverlayRef = useRef(null);
+  const myLocationWatchIdRef = useRef(null);
+
   console.log("[DEBUG][SUPABASE_URL]", SUPABASE_URL);
 
   // 예: 데이터 파일이 "djdemo.xlsx" 라면 geoCache 파일명은 "geoCache_djdemo.xlsx.json"
@@ -660,6 +664,9 @@ candidates.forEach((r, idx) => {
       `;
       labelEl.textContent = list[0].address; // 첫 번째 주소 사용
 
+      // ✅ 라벨은 클릭/터치 이벤트를 막고, 아래 마커가 클릭되게 하기
+      labelEl.style.pointerEvents = "none";
+
       const labelOverlay = new window.kakao.maps.CustomOverlay({
         position: kakaoCoord,
         content: labelEl,
@@ -994,42 +1001,82 @@ candidates.forEach((r, idx) => {
 };
 
 
-  /** 내 위치 마커 **/
+    /** 🔴 내 위치 실시간 추적 (빨간 동그라미, 나만 보임) **/
   useEffect(() => {
     if (!map || !currentUser) return;
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          const lat = pos.coords.latitude;
-          const lng = pos.coords.longitude;
-          const locPosition = new window.kakao.maps.LatLng(lat, lng);
 
-          map.setCenter(locPosition);
-          const markerEl = document.createElement("div");
-          markerEl.style.cssText = `
-            background:#007bff;
-            border-radius:8px;
-            color:white;
-            font-weight:bold;
-            padding:6px 10px;
-            font-size:13px;
-            border:2px solid white;
-            box-shadow:0 0 6px rgba(0,0,0,0.4);
-          `;
-          markerEl.textContent = currentUser.id;
-
-          const overlay = new window.kakao.maps.CustomOverlay({
-            position: locPosition,
-            content: markerEl,
-            yAnchor: 1,
-          });
-          overlay.setMap(map);
-        },
-        (err) =>
-          console.warn("[DEBUG][GEO] ⚠️ 위치 불러오기 실패:", err.message)
-      );
+    if (!navigator.geolocation) {
+      console.warn("[DEBUG][GEO] ⚠️ 이 브라우저는 Geolocation 을 지원하지 않음");
+      return;
     }
+
+    let first = true;
+
+    const success = (pos) => {
+      const lat = pos.coords.latitude;
+      const lng = pos.coords.longitude;
+      const locPosition = new window.kakao.maps.LatLng(lat, lng);
+
+      // 첫 위치 잡을 때만 화면 중앙으로 이동
+      if (first) {
+        map.setCenter(locPosition);
+        first = false;
+      }
+
+      // 이미 내 위치 오버레이가 있으면 위치만 옮김
+      if (myLocationOverlayRef.current) {
+        myLocationOverlayRef.current.setPosition(locPosition);
+        return;
+      }
+
+      // 🔴 빨간 원 엘리먼트 생성
+      const markerEl = document.createElement("div");
+      markerEl.style.cssText = `
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        background: red;
+        border: 3px solid white;
+        box-shadow: 0 0 8px rgba(255,0,0,0.8);
+      `;
+
+      const overlay = new window.kakao.maps.CustomOverlay({
+        position: locPosition,
+        content: markerEl,
+        yAnchor: 0.5,
+        xAnchor: 0.5,
+        zIndex: 99999,
+      });
+
+      overlay.setMap(map);
+      myLocationOverlayRef.current = overlay;
+    };
+
+    const error = (err) => {
+      console.warn("[DEBUG][GEO] ⚠️ 위치 추적 실패:", err?.message);
+    };
+
+    // ✅ 실시간 추적
+    const watchId = navigator.geolocation.watchPosition(success, error, {
+      enableHighAccuracy: true,
+      maximumAge: 5000,
+      timeout: 10000,
+    });
+    myLocationWatchIdRef.current = watchId;
+
+    // 클린업: 지도/유저 변경되거나 컴포넌트 언마운트 시 정리
+    return () => {
+      if (myLocationWatchIdRef.current != null) {
+        navigator.geolocation.clearWatch(myLocationWatchIdRef.current);
+        myLocationWatchIdRef.current = null;
+      }
+      if (myLocationOverlayRef.current) {
+        myLocationOverlayRef.current.setMap(null);
+        myLocationOverlayRef.current = null;
+      }
+    };
   }, [map, currentUser]);
+
 
   /** 로그인 UI **/
   if (!loggedIn)
