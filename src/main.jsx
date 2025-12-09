@@ -743,7 +743,7 @@ candidates.forEach((r, idx) => {
           // 중복 제거한 계기번호 목록
           const uniqueMeters = Array.from(new Set(allIds));
 
-          uniqueMeters.forEach((id) => {
+                   uniqueMeters.forEach((id) => {
             // 이 계기번호에 해당하는 행 하나 찾아서 통신방식/리스트번호 가져오기
             const row =
               list.find((g) => String(g.meter_id || "") === id) || {};
@@ -758,14 +758,67 @@ candidates.forEach((r, idx) => {
             // ✅ 원하는 출력 형식: 리스트번호 | 통신방식 | 계기번호 | 계기타입
             div.textContent = `${listNo} | ${commType} | ${id} | ${type}`;
 
+            // 기본 스타일
+            div.style.padding = "2px 0";
+            div.style.cursor = "pointer";
+            div.title = "클릭 시 계기번호 복사";
+
             // ✅ 뒤 2자리가 같은 계기번호들만 빨간색 처리
             const suffix = id.slice(-2);
             if (suffix && suffixCount[suffix] > 1) {
               div.style.color = "red";
             }
 
+            // ✅ 클릭 시 계기번호 클립보드 복사
+            div.addEventListener("click", (e) => {
+              e.stopPropagation(); // 팝업/마커 클릭 이벤트로 안 올라가게
+
+              const meterIdToCopy = id;
+
+              if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard
+                  .writeText(meterIdToCopy)
+                  .then(() => {
+                    // 살짝 하이라이트 효과
+                    const oldBg = div.style.backgroundColor;
+                    div.style.backgroundColor = "#f0f8ff";
+                    setTimeout(() => {
+                      div.style.backgroundColor = oldBg;
+                    }, 200);
+                    console.log(
+                      "[DEBUG][COPY] 계기번호 복사 완료:",
+                      meterIdToCopy
+                    );
+                  })
+                  .catch((err) => {
+                    console.warn("[DEBUG][COPY] 클립보드 복사 실패:", err);
+                    alert("복사에 실패했습니다. 다시 시도해주세요.");
+                  });
+              } else {
+                // 구형 브라우저 대응 (거의 안 쓸 가능성 높지만 백업용)
+                const textarea = document.createElement("textarea");
+                textarea.value = meterIdToCopy;
+                textarea.style.position = "fixed";
+                textarea.style.top = "-9999px";
+                document.body.appendChild(textarea);
+                textarea.focus();
+                textarea.select();
+                try {
+                  document.execCommand("copy");
+                  console.log(
+                    "[DEBUG][COPY] execCommand 로 계기번호 복사:",
+                    meterIdToCopy
+                  );
+                } catch (err) {
+                  alert("복사에 실패했습니다. 직접 복사해주세요.");
+                }
+                document.body.removeChild(textarea);
+              }
+            });
+
             popupEl.appendChild(div);
           });
+
 
           popupEl.appendChild(document.createElement("hr"));
 
