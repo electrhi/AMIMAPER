@@ -1301,6 +1301,10 @@ function App() {
       boxShadow: "0 2px 5px rgba(0,0,0,0.2)",
       zIndex: 999999,
       fontSize: "12px",
+
+      // 🔽 여기 두 줄 추가 (전체 박스를 70% 크기로)
+    transform: "scale(0.7)",
+    transformOrigin: "top left",
     }}
   >
     {/* 상태 카운트 */}
