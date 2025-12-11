@@ -43,12 +43,13 @@ function App() {
   // 예: 데이터 파일이 "djdemo.xlsx" 라면 geoCache 파일명은 "geoCache_djdemo.xlsx.json"
   const GEO_CACHE_FILE = `geoCache_${currentUser?.data_file || "default"}.json`;
 
-  // 렌더링 중에 유지되는 전역 비슷한 배열
-  let markers = [];
-  let activeOverlay = null;
+  // 🔹 마커 오버레이들을 유지하기 위한 ref
+  const markersRef = useRef([]);
 
+  // activeOverlay 는 지금처럼 window 전역 써도 OK
   const getActiveOverlay = () => window.__activeOverlayRef || null;
   const setActiveOverlay = (ov) => (window.__activeOverlayRef = ov);
+
 
   /** 🔐 수동 로그인 처리 **/
   const handleLogin = async (e) => {
@@ -417,7 +418,7 @@ function App() {
     const lng = parseFloat(coords.lng);
     let updatedCount = 0;
 
-    markers.forEach((overlay) => {
+    markersRef.current.forEach((overlay) => {
       const pos = overlay.getPosition?.();
       if (!pos) return;
 
@@ -559,8 +560,8 @@ function App() {
       }
 
       // 기존 마커 제거
-      markers.forEach((m) => m.setMap(null));
-      markers = [];
+      markersRef.current.forEach((m) => m.setMap(null));
+      markersRef.current = [];
 
       // 🔹 기존 주소 라벨 제거
       addressOverlaysRef.current.forEach((ov) => ov.setMap(null));
@@ -668,7 +669,7 @@ function App() {
           yAnchor: 1,
         });
         overlay.setMap(map);
-        markers.push(overlay);
+        markersRef.current.push(overlay);
         markerCount++;
 
         // 🔹 현재 지도 레벨 기준으로 라벨 표시 여부 결정
