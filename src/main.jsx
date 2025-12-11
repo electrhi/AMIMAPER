@@ -1289,76 +1289,74 @@ function App() {
   /** 지도 UI **/
   return (
     <div style={{ width: "100%", height: "100vh", position: "relative" }}>
-      {/* 왼쪽 상단 상태 카운트 */}
-      <div
-        style={{
-          position: "fixed",
-          top: 10,
-          left: 10,
-          background: "white",
-          padding: "8px 12px",
-          borderRadius: "8px",
-          boxShadow: "0 2px 5px rgba(0,0,0,0.2)",
-          zIndex: 999999,
-          fontWeight: "bold",
-        }}
-      >
-        ✅ 완료: {counts["완료"] || 0} | ❌ 불가: {counts["불가"] || 0} | 🟦 미방문:{" "}
-        {counts["미방문"] || 0}
-      </div>
+        {/* 왼쪽 상단 상태 카운트 + 마커 개수 필터 */}
+  <div
+    style={{
+      position: "fixed",
+      top: 10,
+      left: 10,
+      background: "white",
+      padding: "8px 12px",
+      borderRadius: "8px",
+      boxShadow: "0 2px 5px rgba(0,0,0,0.2)",
+      zIndex: 999999,
+      fontSize: "12px",
+    }}
+  >
+    {/* 상태 카운트 */}
+    <div style={{ fontWeight: "bold", marginBottom: 6 }}>
+      ✅ 완료: {counts["완료"] || 0} | ❌ 불가: {counts["불가"] || 0} | 🟦 미방문:{" "}
+      {counts["미방문"] || 0}
+    </div>
 
-      {/* 🔍 마커 개수 필터 (오른쪽 상단) */}
-      <div
-        style={{
-          position: "fixed",
-          top: 10,
-          right: 10,
-          background: "white",
-          padding: "8px 10px",
-          borderRadius: "8px",
-          boxShadow: "0 2px 5px rgba(0,0,0,0.2)",
-          zIndex: 999999,
-          fontSize: "12px",
-        }}
-      >
-        <div style={{ marginBottom: 4, fontWeight: "bold" }}>마커 개수 필터</div>
-        <div style={{ display: "flex", alignItems: "center" }}>
-          <input
-            type="number"
-            min="1"
-            value={minMarkerCount}
-            onChange={(e) => setMinMarkerCount(e.target.value)}
-            placeholder="예: 3"
-            style={{
-              width: "70px",
-              padding: "3px 6px",
-              fontSize: "12px",
-              borderRadius: "4px",
-              border: "1px solid #ccc",
-              boxSizing: "border-box",
-            }}
-          />
-          <button
-            onClick={handleApplyFilter}
-            style={{
-              marginLeft: 6,
-              padding: "4px 8px",
-              fontSize: "12px",
-              borderRadius: "4px",
-              border: "none",
-              background: "#007bff",
-              color: "white",
-              cursor: "pointer",
-              whiteSpace: "nowrap",
-            }}
-          >
-            필터
-          </button>
-        </div>
-        <div style={{ marginTop: 2, fontSize: "11px", color: "#555" }}>
-          비우면 전체 표시
-        </div>
+    {/* 마커 개수 필터 */}
+    <div
+      style={{
+        marginTop: 4,
+        paddingTop: 4,
+        borderTop: "1px solid #eee",
+      }}
+    >
+      <div style={{ marginBottom: 4, fontWeight: "bold" }}>마커 개수 필터</div>
+      <div style={{ display: "flex", alignItems: "center" }}>
+        <input
+          type="number"
+          min="1"
+          value={minMarkerCount}
+          onChange={(e) => setMinMarkerCount(e.target.value)}
+          placeholder="예: 3"
+          style={{
+            width: "70px",
+            padding: "3px 6px",
+            fontSize: "12px",
+            borderRadius: "4px",
+            border: "1px solid #ccc",
+            boxSizing: "border-box",
+          }}
+        />
+        <button
+          onClick={handleApplyFilter}
+          style={{
+            marginLeft: 6,
+            padding: "4px 8px",
+            fontSize: "12px",
+            borderRadius: "4px",
+            border: "none",
+            background: "#007bff",
+            color: "white",
+            cursor: "pointer",
+            whiteSpace: "nowrap",
+          }}
+        >
+          필터
+        </button>
       </div>
+      <div style={{ marginTop: 2, fontSize: "11px", color: "#555" }}>
+        비우면 전체 표시
+      </div>
+    </div>
+  </div>
+
 
       <button
         onClick={toggleMapType}
