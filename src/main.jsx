@@ -15,7 +15,6 @@ const normalizeMeterId = (id) =>
     .replace(/[\s\u00A0\u200B-\u200D\uFEFF]/g, "")
     .trim();
 
-
 function App() {
   const [user, setUser] = useState("");
   const [password, setPassword] = useState("");
@@ -32,9 +31,12 @@ function App() {
   // 🔹 이 레벨 이하에서만 주소 라벨을 보여준다 (값은 취향대로 조절)
   const LABEL_SHOW_LEVEL = 5;
 
-    // 🔴 내 위치 오버레이 & watchId
+  // 🔴 내 위치 오버레이 & watchId
   const myLocationOverlayRef = useRef(null);
   const myLocationWatchIdRef = useRef(null);
+
+  // ✅ 마커 개수 필터 (입력 숫자 이상만 표시, 비어 있으면 전체)
+  const [minMarkerCount, setMinMarkerCount] = useState("");
 
   console.log("[DEBUG][SUPABASE_URL]", SUPABASE_URL);
 
@@ -330,6 +332,12 @@ function App() {
     setMapType(newType);
   };
 
+  /** 마커 개수 필터 적용 버튼 **/
+  const handleApplyFilter = () => {
+    console.log("[DEBUG][FILTER] 적용 시도, minMarkerCount =", minMarkerCount);
+    renderMarkers();
+  };
+
   /** 최신 상태 가져오기 (DB 읽기 - 클릭 시 사용) **/
   const fetchLatestStatus = async () => {
     try {
@@ -350,22 +358,21 @@ function App() {
       );
 
       // ====== 🔍 디버그: 2519로 시작하는 계량기 후보 전부 찍어보기 ======
-const candidates = fresh.filter((r) => {
-  const raw = String(r.meter_id ?? "");
-  return raw.includes("2519") || normalizeMeterId(raw).includes("25191769853");
-});
+      const candidates = fresh.filter((r) => {
+        const raw = String(r.meter_id ?? "");
+        return raw.includes("2519") || normalizeMeterId(raw).includes("25191769853");
+      });
 
-console.log("[DEBUG][CHECK] 2519 포함하는 후보 개수:", candidates.length);
+      console.log("[DEBUG][CHECK] 2519 포함하는 후보 개수:", candidates.length);
 
-candidates.forEach((r, idx) => {
-  const raw = String(r.meter_id ?? "");
-  console.log(
-    `[DEBUG][CHECK] 후보${idx} raw='${raw}' charCodes=`,
-    Array.from(raw).map((ch) => ch.charCodeAt(0))
-  );
-});
-// =============================================================
-
+      candidates.forEach((r, idx) => {
+        const raw = String(r.meter_id ?? "");
+        console.log(
+          `[DEBUG][CHECK] 후보${idx} raw='${raw}' charCodes=`,
+          Array.from(raw).map((ch) => ch.charCodeAt(0))
+        );
+      });
+      // =============================================================
 
       const latestMap = {};
       fresh.forEach((r) => {
@@ -540,6 +547,17 @@ candidates.forEach((r, idx) => {
 
       console.log("[DEBUG][MAP] 🔄 마커 렌더링 시작...");
 
+      // ✅ 마커 개수 필터 값 파싱 (입력 비었거나 0 이하면 필터 끔)
+      const threshold = parseInt(minMarkerCount, 10);
+      const useSizeFilter = !isNaN(threshold) && threshold > 0;
+      if (useSizeFilter) {
+        console.log(
+          `[DEBUG][FILTER] 최소 ${threshold}개 이상인 마커만 표시`
+        );
+      } else {
+        console.log("[DEBUG][FILTER] 필터 미사용(전체 표시)");
+      }
+
       // 기존 마커 제거
       markers.forEach((m) => m.setMap(null));
       markers = [];
@@ -617,6 +635,12 @@ candidates.forEach((r, idx) => {
       let markerCount = 0;
       Object.keys(grouped).forEach((key) => {
         const { coords, list } = grouped[key];
+
+        // ✅ 마커 개수 필터: list.length 가 threshold 미만이면 스킵
+        if (useSizeFilter && list.length < threshold) {
+          return;
+        }
+
         const 진행 = list[0].status;
         const color =
           진행 === "완료" ? "green" : 진행 === "불가" ? "red" : "blue";
@@ -647,36 +671,36 @@ candidates.forEach((r, idx) => {
         markers.push(overlay);
         markerCount++;
 
-          // 🔹 현재 지도 레벨 기준으로 라벨 표시 여부 결정
-      const currentLevel = map.getLevel();
-      const showLabel = currentLevel <= LABEL_SHOW_LEVEL;
+        // 🔹 현재 지도 레벨 기준으로 라벨 표시 여부 결정
+        const currentLevel = map.getLevel();
+        const showLabel = currentLevel <= LABEL_SHOW_LEVEL;
 
-      // 🔹 주소 라벨용 엘리먼트
-      const labelEl = document.createElement("div");
-      labelEl.style.cssText = `
-        background: rgba(255,255,255,0.9);
-        border-radius: 4px;
-        padding: 2px 4px;
-        border: 1px solid #ddd;
-        font-size: 11px;
-        white-space: nowrap;
-        transform: translateY(-4px);
-      `;
-      labelEl.textContent = list[0].address; // 첫 번째 주소 사용
+        // 🔹 주소 라벨용 엘리먼트
+        const labelEl = document.createElement("div");
+        labelEl.style.cssText = `
+          background: rgba(255,255,255,0.9);
+          border-radius: 4px;
+          padding: 2px 4px;
+          border: 1px solid #ddd;
+          font-size: 11px;
+          white-space: nowrap;
+          transform: translateY(-4px);
+        `;
+        labelEl.textContent = list[0].address; // 첫 번째 주소 사용
 
-      // ✅ 라벨은 클릭/터치 이벤트를 막고, 아래 마커가 클릭되게 하기
-      labelEl.style.pointerEvents = "none";
+        // ✅ 라벨은 클릭/터치 이벤트를 막고, 아래 마커가 클릭되게 하기
+        labelEl.style.pointerEvents = "none";
 
-      const labelOverlay = new window.kakao.maps.CustomOverlay({
-        position: kakaoCoord,
-        content: labelEl,
-        yAnchor: 1.7, // 마커 조금 위쪽에 표시
-        zIndex: 5,
-      });
+        const labelOverlay = new window.kakao.maps.CustomOverlay({
+          position: kakaoCoord,
+          content: labelEl,
+          yAnchor: 1.7, // 마커 조금 위쪽에 표시
+          zIndex: 5,
+        });
 
-      // 🔹 레벨 조건에 따라 처음 렌더 시 보이거나 숨기기
-      labelOverlay.setMap(showLabel ? map : null);
-      addressOverlaysRef.current.push(labelOverlay);
+        // 🔹 레벨 조건에 따라 처음 렌더 시 보이거나 숨기기
+        labelOverlay.setMap(showLabel ? map : null);
+        addressOverlaysRef.current.push(labelOverlay);
 
         // 마커 클릭 시 팝업 + 상태 버튼
         const openPopup = async (e) => {
@@ -743,7 +767,7 @@ candidates.forEach((r, idx) => {
           // 중복 제거한 계기번호 목록
           const uniqueMeters = Array.from(new Set(allIds));
 
-                   uniqueMeters.forEach((id) => {
+          uniqueMeters.forEach((id) => {
             // 이 계기번호에 해당하는 행 하나 찾아서 통신방식/리스트번호 가져오기
             const row =
               list.find((g) => String(g.meter_id || "") === id) || {};
@@ -818,7 +842,6 @@ candidates.forEach((r, idx) => {
 
             popupEl.appendChild(div);
           });
-
 
           popupEl.appendChild(document.createElement("hr"));
 
@@ -911,7 +934,7 @@ candidates.forEach((r, idx) => {
     waitForReady();
   }, [map, data, geoCache]);
 
-    // 🔹 줌 레벨에 따라 주소 라벨 토글
+  // 🔹 줌 레벨에 따라 주소 라벨 토글
   useEffect(() => {
     if (!map || typeof window.kakao === "undefined") return;
 
@@ -931,7 +954,6 @@ candidates.forEach((r, idx) => {
       window.kakao.maps.event.removeListener(map, "zoom_changed", handler);
     };
   }, [map]);
-
 
   /** 상태 업데이트 (버튼 클릭 시만 DB 업로드) **/
   const updateStatus = async (meterIds, newStatus, coords) => {
@@ -992,69 +1014,68 @@ candidates.forEach((r, idx) => {
 
   /** 관리자 모드: 다른 사용자 위치 불러오기 **/
   const loadOtherUserLocations = async () => {
-  if (!map) return;
+    if (!map) return;
 
-  // 기존 관리자 오버레이 제거
-  otherUserOverlays.current.forEach((ov) => ov.setMap(null));
-  otherUserOverlays.current = [];
+    // 기존 관리자 오버레이 제거
+    otherUserOverlays.current.forEach((ov) => ov.setMap(null));
+    otherUserOverlays.current = [];
 
-  const { data: logs, error } = await supabase
-    .from("meters")
-    .select("address, lat, lng, status, user_id, updated_at")
-    .not("user_id", "is", null)
-    .order("updated_at", { ascending: false });
+    const { data: logs, error } = await supabase
+      .from("meters")
+      .select("address, lat, lng, status, user_id, updated_at")
+      .not("user_id", "is", null)
+      .order("updated_at", { ascending: false });
 
-  if (error) throw error;
+    if (error) throw error;
 
-  const latest = {};
-  logs.forEach((l) => {
-    if (!l.user_id || !l.lat || !l.lng) return;
-    if (!latest[l.user_id]) latest[l.user_id] = l;
-  });
-
-  Object.keys(latest).forEach((uid) => {
-    const loc = latest[uid];
-    const coord = new window.kakao.maps.LatLng(loc.lat, loc.lng);
-
-    const markerEl = document.createElement("div");
-    markerEl.style.cssText = `
-      background:purple;
-      border-radius:8px;
-      padding:4px 7px;
-      color:white;
-      font-weight:bold;
-      font-size:11px;
-      box-shadow:0 0 6px rgba(0,0,0,0.4);
-      text-shadow:0 0 3px black;
-      cursor:pointer;          /* 👉 클릭 가능 느낌 */
-    `;
-    markerEl.textContent = uid;
-
-    // 👉 이름(보라색 박스) 클릭하면 해당 위치로 카카오 길찾기
-    markerEl.addEventListener("click", (e) => {
-      e.stopPropagation();
-
-      const label = loc.address || uid; // 주소가 있으면 주소, 없으면 유저ID
-
-      const url = `https://map.kakao.com/link/to/${encodeURIComponent(
-        label
-      )},${loc.lat},${loc.lng}`;
-
-      window.open(url, "_blank");
+    const latest = {};
+    logs.forEach((l) => {
+      if (!l.user_id || !l.lat || !l.lng) return;
+      if (!latest[l.user_id]) latest[l.user_id] = l;
     });
 
-    const overlay = new window.kakao.maps.CustomOverlay({
-      position: coord,
-      content: markerEl,
-      yAnchor: 2.5,
+    Object.keys(latest).forEach((uid) => {
+      const loc = latest[uid];
+      const coord = new window.kakao.maps.LatLng(loc.lat, loc.lng);
+
+      const markerEl = document.createElement("div");
+      markerEl.style.cssText = `
+        background:purple;
+        border-radius:8px;
+        padding:4px 7px;
+        color:white;
+        font-weight:bold;
+        font-size:11px;
+        box-shadow:0 0 6px rgba(0,0,0,0.4);
+        text-shadow:0 0 3px black;
+        cursor:pointer;          /* 👉 클릭 가능 느낌 */
+      `;
+      markerEl.textContent = uid;
+
+      // 👉 이름(보라색 박스) 클릭하면 해당 위치로 카카오 길찾기
+      markerEl.addEventListener("click", (e) => {
+        e.stopPropagation();
+
+        const label = loc.address || uid; // 주소가 있으면 주소, 없으면 유저ID
+
+        const url = `https://map.kakao.com/link/to/${encodeURIComponent(
+          label
+        )},${loc.lat},${loc.lng}`;
+
+        window.open(url, "_blank");
+      });
+
+      const overlay = new window.kakao.maps.CustomOverlay({
+        position: coord,
+        content: markerEl,
+        yAnchor: 2.5,
+      });
+      overlay.setMap(map);
+      otherUserOverlays.current.push(overlay);
     });
-    overlay.setMap(map);
-    otherUserOverlays.current.push(overlay);
-  });
-};
+  };
 
-
-    /** 🔴 내 위치 실시간 추적 (빨간 동그라미, 나만 보임) **/
+  /** 🔴 내 위치 실시간 추적 (빨간 동그라미, 나만 보임) **/
   useEffect(() => {
     if (!map || !currentUser) return;
 
@@ -1129,7 +1150,6 @@ candidates.forEach((r, idx) => {
       }
     };
   }, [map, currentUser]);
-
 
   /** 로그인 UI **/
   if (!loggedIn)
@@ -1268,6 +1288,7 @@ candidates.forEach((r, idx) => {
   /** 지도 UI **/
   return (
     <div style={{ width: "100%", height: "100vh", position: "relative" }}>
+      {/* 왼쪽 상단 상태 카운트 */}
       <div
         style={{
           position: "fixed",
@@ -1283,6 +1304,59 @@ candidates.forEach((r, idx) => {
       >
         ✅ 완료: {counts["완료"] || 0} | ❌ 불가: {counts["불가"] || 0} | 🟦 미방문:{" "}
         {counts["미방문"] || 0}
+      </div>
+
+      {/* 🔍 마커 개수 필터 (오른쪽 상단) */}
+      <div
+        style={{
+          position: "fixed",
+          top: 10,
+          right: 10,
+          background: "white",
+          padding: "8px 10px",
+          borderRadius: "8px",
+          boxShadow: "0 2px 5px rgba(0,0,0,0.2)",
+          zIndex: 999999,
+          fontSize: "12px",
+        }}
+      >
+        <div style={{ marginBottom: 4, fontWeight: "bold" }}>마커 개수 필터</div>
+        <div style={{ display: "flex", alignItems: "center" }}>
+          <input
+            type="number"
+            min="1"
+            value={minMarkerCount}
+            onChange={(e) => setMinMarkerCount(e.target.value)}
+            placeholder="예: 3"
+            style={{
+              width: "70px",
+              padding: "3px 6px",
+              fontSize: "12px",
+              borderRadius: "4px",
+              border: "1px solid #ccc",
+              boxSizing: "border-box",
+            }}
+          />
+          <button
+            onClick={handleApplyFilter}
+            style={{
+              marginLeft: 6,
+              padding: "4px 8px",
+              fontSize: "12px",
+              borderRadius: "4px",
+              border: "none",
+              background: "#007bff",
+              color: "white",
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+            }}
+          >
+            필터
+          </button>
+        </div>
+        <div style={{ marginTop: 2, fontSize: "11px", color: "#555" }}>
+          비우면 전체 표시
+        </div>
       </div>
 
       <button
