@@ -15,6 +15,24 @@ const normalizeMeterId = (id) =>
     .replace(/[\s\u00A0\u200B-\u200D\uFEFF]/g, "")
     .trim();
 
+// ✅ debounce (300~500ms 권장)
+const debounce = (fn, delay = 400) => {
+  let t;
+  return (...args) => {
+    clearTimeout(t);
+    t = setTimeout(() => fn(...args), delay);
+  };
+};
+
+// ✅ 배열 chunk (Supabase in() 길이 대비)
+const chunkArray = (arr, size = 500) => {
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+};
+
+
+
 function App() {
   const [user, setUser] = useState("");
   const [password, setPassword] = useState("");
@@ -45,6 +63,69 @@ function App() {
 
   // 🔹 마커 오버레이들을 유지하기 위한 ref
   const markersRef = useRef([]);
+
+  // ✅ 최신 data를 이벤트 핸들러에서 안전하게 쓰기 위한 ref
+const dataRef = useRef([]);
+useEffect(() => {
+  dataRef.current = data;
+}, [data]);
+
+// ✅ meters 최신 상태 캐시 (meter_id -> row)
+const metersCacheRef = useRef(new Map());
+
+// ✅ fetch 중복/경합 방지용 시퀀스
+const metersFetchSeqRef = useRef(0);
+
+// ✅ meters 상태를 "특정 meterIds"만 DB에서 읽어와서 data에 반영
+const fetchMetersStatusByIds = async (meterIds) => {
+  const ids = Array.from(new Set((meterIds || []).map(normalizeMeterId))).filter(Boolean);
+  if (ids.length === 0) return;
+
+  console.count("[DEBUG][FETCH] meters by ids"); // ✅ 호출 위치/횟수 추적
+
+  const seq = ++metersFetchSeqRef.current;
+
+  // ✅ 필요한 컬럼만 (select=* 금지)
+  const columns = "meter_id,status,updated_at";
+
+  let rows = [];
+  for (const part of chunkArray(ids, 500)) {
+    const { data: chunkRows, error } = await supabase
+      .from("meters")
+      .select(columns)
+      .in("meter_id", part);
+
+    if (error) {
+      console.error("[ERROR][FETCH] meters:", error.message);
+      return;
+    }
+    rows = rows.concat(chunkRows || []);
+  }
+
+  // 더 최신 요청이 이미 시작됐으면 이번 결과는 버림
+  if (seq !== metersFetchSeqRef.current) return;
+
+  // meter_id별 가장 최신(updated_at)만 남기기
+  const latest = new Map();
+  for (const r of rows) {
+    const id = normalizeMeterId(r.meter_id);
+    const prev = latest.get(id);
+    if (!prev || new Date(r.updated_at) > new Date(prev.updated_at)) latest.set(id, r);
+  }
+
+  // 캐시 업데이트
+  for (const [id, r] of latest.entries()) metersCacheRef.current.set(id, r);
+
+  // data에 status만 반영
+  setData((prev) =>
+    prev.map((row) => {
+      const id = normalizeMeterId(row.meter_id);
+      const m = latest.get(id);
+      return m ? { ...row, status: m.status || row.status } : row;
+    })
+  );
+};
+
 
   // activeOverlay 는 지금처럼 window 전역 써도 OK
   const getActiveOverlay = () => window.__activeOverlayRef || null;
@@ -166,17 +247,30 @@ function App() {
         list_no: r["리스트번호"] || "", // 예: 5131, 5152
       }));
 
-      // 2) DB에서 최신 상태 전부 읽어오기
-      const { data: dbData } = await supabase
-        .from("meters")
-        .select("*")
-        .order("updated_at", { ascending: false });
+      // ✅ 2) DB에서 최신 상태를 "엑셀에 있는 meter_id들만" 읽어오기 (전체 select(*) 금지)
+const excelIds = baseData.map((x) => normalizeMeterId(x.meter_id)).filter(Boolean);
 
-      const latestMap = {};
-      dbData?.forEach((d) => {
-        const key = normalizeMeterId(d.meter_id);
-        if (!latestMap[key]) latestMap[key] = d;
-      });
+const columns = "meter_id,status,updated_at";
+let rows = [];
+for (const part of chunkArray(excelIds, 500)) {
+  const { data: chunkRows, error } = await supabase
+    .from("meters")
+    .select(columns)
+    .in("meter_id", part);
+
+  if (error) throw error;
+  rows = rows.concat(chunkRows || []);
+}
+
+const latestMap = {};
+rows.forEach((d) => {
+  const key = normalizeMeterId(d.meter_id);
+  if (!latestMap[key] || new Date(d.updated_at) > new Date(latestMap[key].updated_at)) {
+    latestMap[key] = d;
+  }
+});
+
+
 
       // 3) 상태는 "DB 값 > 없으면 미방문" 이라는 한 가지 규칙만 사용
       const merged = baseData.map((x) => {
@@ -218,6 +312,55 @@ function App() {
     };
     document.head.appendChild(script);
   }, [loggedIn]);
+
+  // ✅ 지도 이동/줌 종료 시: 화면(bounds) 안에 있는 계기들만 상태 동기화 (디바운스)
+useEffect(() => {
+  if (!map || !window.kakao?.maps) return;
+
+  const syncInView = async () => {
+    console.count("[DEBUG][FETCH] sync in view"); // ✅ 호출 추적
+
+    const b = map.getBounds();
+    const sw = b.getSouthWest();
+    const ne = b.getNorthEast();
+
+    const swLat = sw.getLat();
+    const swLng = sw.getLng();
+    const neLat = ne.getLat();
+    const neLng = ne.getLng();
+
+    // ✅ 현재 화면에 보이는 meter_id만 추림 (엑셀 좌표 기준)
+    const visibleIds = [];
+    for (const row of dataRef.current) {
+      if (row.lat == null || row.lng == null) continue;
+      if (
+        row.lat >= swLat && row.lat <= neLat &&
+        row.lng >= swLng && row.lng <= neLng
+      ) {
+        visibleIds.push(row.meter_id);
+      }
+    }
+
+    await fetchLatestStatus(visibleIds);
+  };
+
+  const debounced = debounce(syncInView, 400);
+
+  const onDragEnd = () => debounced();
+  const onZoomChanged = () => debounced();
+
+  window.kakao.maps.event.addListener(map, "dragend", onDragEnd);
+  window.kakao.maps.event.addListener(map, "zoom_changed", onZoomChanged);
+
+  // 최초 1회
+  debounced();
+
+  return () => {
+    window.kakao.maps.event.removeListener(map, "dragend", onDragEnd);
+    window.kakao.maps.event.removeListener(map, "zoom_changed", onZoomChanged);
+  };
+}, [map]);
+
 
   /** Supabase에서 geoCache 파일 로드 (지오코딩 결과 JSON) **/
   useEffect(() => {
@@ -339,63 +482,23 @@ function App() {
     renderMarkers();
   };
 
-  /** 최신 상태 가져오기 (DB 읽기 - 클릭 시 사용) **/
-  const fetchLatestStatus = async () => {
-    try {
-      console.log("[DEBUG][SYNC] 🔄 Supabase 최신 상태 재동기화...");
-      const { data: fresh, error } = await supabase
-        .from("meters")
-        .select("*")
-        .order("updated_at", { ascending: false });
-      if (error) throw error;
+/** 최신 상태 가져오기 (DB 읽기 - 필요한 것만) **/
+const fetchLatestStatus = async (meterIds = null) => {
+  try {
+    console.log("[DEBUG][SYNC] 🔄 최신 상태 동기화...");
 
-      // 🔍 특정 계량기 확인 (정규화 기준)
-      console.log(
-        "[DEBUG][CHECK] fresh 중 25191769853:",
-        fresh?.find(
-          (r) =>
-            normalizeMeterId(r.meter_id) === normalizeMeterId("25191769853")
-        )
-      );
+    const ids = meterIds
+      ? meterIds.map(normalizeMeterId).filter(Boolean)
+      : dataRef.current.map((d) => normalizeMeterId(d.meter_id)).filter(Boolean);
 
-      // ====== 🔍 디버그: 2519로 시작하는 계량기 후보 전부 찍어보기 ======
-      const candidates = fresh.filter((r) => {
-        const raw = String(r.meter_id ?? "");
-        return raw.includes("2519") || normalizeMeterId(raw).includes("25191769853");
-      });
+    await fetchMetersStatusByIds(ids);
 
-      console.log("[DEBUG][CHECK] 2519 포함하는 후보 개수:", candidates.length);
+    console.log("[DEBUG][SYNC] ✅ 최신 상태 반영 완료");
+  } catch (err) {
+    console.error("[ERROR][SYNC] 상태 갱신 실패:", err.message);
+  }
+};
 
-      candidates.forEach((r, idx) => {
-        const raw = String(r.meter_id ?? "");
-        console.log(
-          `[DEBUG][CHECK] 후보${idx} raw='${raw}' charCodes=`,
-          Array.from(raw).map((ch) => ch.charCodeAt(0))
-        );
-      });
-      // =============================================================
-
-      const latestMap = {};
-      fresh.forEach((r) => {
-        const key = normalizeMeterId(r.meter_id);
-        if (!latestMap[key]) latestMap[key] = r;
-      });
-
-      const updated = data.map((d) => {
-        const key = normalizeMeterId(d.meter_id);
-        return latestMap[key]
-          ? { ...d, status: latestMap[key].status }
-          : d;
-      });
-
-      setData(updated);
-      console.log("[DEBUG][SYNC] ✅ 최신 상태 반영 완료");
-      return updated;
-    } catch (err) {
-      console.error("[ERROR][SYNC] 상태 갱신 실패:", err.message);
-      return data;
-    }
-  };
 
   // ✅ 거리 계산 함수 (미터 단위)
   const distanceInMeters = (lat1, lon1, lat2, lon2) => {
@@ -707,7 +810,7 @@ function App() {
         const openPopup = async (e) => {
           e.stopPropagation();
           // 여기서 최신 상태 1회 동기화 (클릭 시에만 호출)
-          await fetchLatestStatus();
+          await fetchLatestStatus(list.map((g) => g.meter_id));
 
           const old = getActiveOverlay();
           if (old) old.setMap(null);
@@ -983,18 +1086,18 @@ function App() {
         };
       });
 
-      const { error: upsertError } = await supabase.from("meters").upsert(
-        payload,
-        {
-          onConflict: ["meter_id", "address"],
-        }
-      );
-      if (upsertError) throw upsertError;
+      const { error: upsertError } = await supabase
+  .from("meters")
+  .upsert(payload, { onConflict: "meter_id,address" })
+  .select("meter_id"); // ✅ 응답 최소화
 
-      console.log("[DEBUG][STATUS] ✅ DB 업데이트 완료:", payload);
+if (upsertError) throw upsertError;
 
-      // 최신 상태를 로컬 data에 반영
-      await fetchLatestStatus();
+console.log("[DEBUG][STATUS] ✅ DB 업데이트 완료:", payload);
+
+// ✅ 최신 상태는 "방금 업데이트한 계기들만" 반영
+await fetchLatestStatus(payload.map((p) => p.meter_id));
+
       // 전체 재렌더 대신 근처 마커 색만 빠르게 업데이트
       renderMarkersPartial(coords, newStatus);
 
