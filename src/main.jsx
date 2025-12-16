@@ -90,10 +90,14 @@ const fetchMetersStatusByIds = async (meterIds) => {
 
   let rows = [];
   for (const part of chunkArray(ids, 500)) {
-    const { data: chunkRows, error } = await supabase
-      .from("meters")
-      .select(columns)
-      .in("meter_id", part);
+    const dataFile = currentUser?.data_file;
+if (!dataFile) return;
+
+const { data: chunkRows, error } = await supabase
+  .from("meters")
+  .select(columns)
+  .eq("data_file", dataFile)
+  .in("meter_id", part);
 
     if (error) {
       console.error("[ERROR][FETCH] meters:", error.message);
@@ -254,9 +258,11 @@ const columns = "meter_id,status,updated_at";
 let rows = [];
 for (const part of chunkArray(excelIds, 500)) {
   const { data: chunkRows, error } = await supabase
-    .from("meters")
-    .select(columns)
-    .in("meter_id", part);
+  .from("meters")
+  .select(columns)
+  .eq("data_file", fileName)
+  .in("meter_id", part);
+
 
   if (error) throw error;
   rows = rows.concat(chunkRows || []);
@@ -1076,6 +1082,7 @@ const fetchLatestStatus = async (meterIds = null) => {
             (d) => normalizeMeterId(d.meter_id) === normId
           ) || {};
         return {
+          data_file: currentUser.data_file,   // ✅ 추가
           meter_id: normId,
           address: row.address || "",
           status: newStatus,
@@ -1088,7 +1095,7 @@ const fetchLatestStatus = async (meterIds = null) => {
 
       const { error: upsertError } = await supabase
   .from("meters")
-  .upsert(payload, { onConflict: "meter_id,address" })
+  .upsert(payload, { onConflict: "data_file,meter_id,address" })
   .select("meter_id"); // ✅ 응답 최소화
 
 if (upsertError) throw upsertError;
@@ -1127,6 +1134,7 @@ await fetchLatestStatus(payload.map((p) => p.meter_id));
     const { data: logs, error } = await supabase
       .from("meters")
       .select("address, lat, lng, status, user_id, updated_at")
+      .eq("data_file", currentUser.data_file)   // ✅ 추가
       .not("user_id", "is", null)
       .order("updated_at", { ascending: false });
 
