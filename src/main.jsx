@@ -1131,12 +1131,11 @@ await fetchLatestStatus(payload.map((p) => p.meter_id));
     otherUserOverlays.current.forEach((ov) => ov.setMap(null));
     otherUserOverlays.current = [];
 
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
     const { data: logs, error } = await supabase
-      .from("meters")
-      .select("address, lat, lng, status, user_id, updated_at")
-      .eq("data_file", currentUser.data_file)   // ✅ 추가
-      .not("user_id", "is", null)
-      .order("updated_at", { ascending: false });
+      .from("user_last_locations")
+      .select("user_id, address, lat, lng, status, updated_at, data_file");
 
     if (error) throw error;
 
