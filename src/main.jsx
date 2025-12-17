@@ -8,7 +8,6 @@ const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_KEY;
 const KAKAO_KEY = import.meta.env.VITE_KAKAO_JAVASCRIPT_KEY;
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-
 // ✅ 계기번호 공통 정규화 함수 (모든 종류의 공백/제로폭문자 제거)
 const normalizeMeterId = (id) =>
   String(id ?? "")
@@ -32,208 +31,6 @@ const chunkArray = (arr, size = 500) => {
   return out;
 };
 
-// =========================
-// ✅ IndexedDB + Storage meta 기반 캐시 (egress 절감)
-// =========================
-const IDB_NAME = "amimap-cache-v1";
-const IDB_STORE = "files";
-
-const idbOpen = () =>
-  new Promise((resolve, reject) => {
-    try {
-      const req = indexedDB.open(IDB_NAME, 1);
-      req.onupgradeneeded = () => {
-        const db = req.result;
-        if (!db.objectStoreNames.contains(IDB_STORE)) {
-          db.createObjectStore(IDB_STORE, { keyPath: "key" });
-        }
-      };
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => reject(req.error);
-    } catch (e) {
-      reject(e);
-    }
-  });
-
-const idbGet = async (key) => {
-  try {
-    const db = await idbOpen();
-    return await new Promise((resolve, reject) => {
-      const tx = db.transaction(IDB_STORE, "readonly");
-      const store = tx.objectStore(IDB_STORE);
-      const req = store.get(key);
-      req.onsuccess = () => resolve(req.result || null);
-      req.onerror = () => reject(req.error);
-    });
-  } catch {
-    return null; // IndexedDB 불가(시크릿모드 등)면 캐시 없이 진행
-  }
-};
-
-const idbPut = async (record) => {
-  try {
-    const db = await idbOpen();
-    return await new Promise((resolve, reject) => {
-      const tx = db.transaction(IDB_STORE, "readwrite");
-      const store = tx.objectStore(IDB_STORE);
-      const req = store.put(record);
-      req.onsuccess = () => resolve(true);
-      req.onerror = () => reject(req.error);
-    });
-  } catch {
-    return false;
-  }
-};
-
-// Storage 파일 메타(업데이트시각/사이즈)만 가볍게 확인해서 "변경 여부" 판단
-const getStorageMeta = async (bucket, fullPath) => {
-  try {
-    const parts = String(fullPath || "").split("/").filter(Boolean);
-    const name = parts.pop();
-    const dir = parts.join("/"); // 루트면 ""
-
-    const { data, error } = await supabase.storage
-      .from(bucket)
-      .list(dir, { limit: 200, search: name });
-
-    if (error) throw error;
-
-    const f = (data || []).find((x) => x?.name === name);
-    if (!f) return null;
-
-    const updatedAt = f.updated_at || f.created_at || null;
-    const size =
-      f.metadata?.size ??
-      f.metadata?.contentLength ??
-      f.size ??
-      null;
-
-    return { updatedAt, size };
-  } catch (e) {
-    console.warn("[WARN][CACHE] meta 조회 실패:", e?.message);
-    return null;
-  }
-};
-
-const makeStamp = (meta) => {
-  const u = meta?.updatedAt || "";
-  const s = meta?.size ?? "";
-  return `${u}|${s}`;
-};
-
-// ✅ Excel(정적 데이터: meter_id/address/comm_type/list_no)만 캐시
-const loadExcelBaseDataCached = async (fileName) => {
-  const bucket = "excels";
-  const cacheKey = `excel_base:${fileName}`;
-
-  const meta = await getStorageMeta(bucket, fileName);
-  const stamp = makeStamp(meta);
-
-  const cached = await idbGet(cacheKey);
-  if (cached?.stamp && cached.stamp === stamp && Array.isArray(cached.payload)) {
-    console.log("[DEBUG][CACHE] ✅ Excel baseData 캐시 HIT:", fileName);
-    return cached.payload;
-  }
-
-  console.log("[DEBUG][CACHE] ⬇️ Excel 다운로드(캐시 MISS/변경):", fileName);
-
-  const { data: excelBlob, error } = await supabase.storage
-    .from(bucket)
-    .download(fileName);
-  if (error) throw error;
-
-  const buf = await excelBlob.arrayBuffer();
-  const workbook = XLSX.read(buf, { type: "array" });
-  const sheet = workbook.Sheets[workbook.SheetNames[0]];
-  const json = XLSX.utils.sheet_to_json(sheet);
-
-  const baseData = (json || []).map((r) => ({
-    meter_id: normalizeMeterId(r["계기번호"]),
-    address: r["주소"],
-    comm_type: r["통신방식"] || "",
-    list_no: r["리스트번호"] || "",
-  }));
-
-  await idbPut({
-    key: cacheKey,
-    stamp,
-    saved_at: new Date().toISOString(),
-    payload: baseData,
-  });
-
-  return baseData;
-};
-
-// ✅ geoCache JSON 자체를 캐시
-const loadGeoCacheCached = async (geoFileName) => {
-  const bucket = "excels";
-  const cacheKey = `geocache:${geoFileName}`;
-
-  const meta = await getStorageMeta(bucket, geoFileName);
-  const stamp = makeStamp(meta);
-
-  const cached = await idbGet(cacheKey);
-  if (cached?.stamp && cached.stamp === stamp && cached.payload && typeof cached.payload === "object") {
-    console.log("[DEBUG][CACHE] ✅ geoCache 캐시 HIT:", geoFileName);
-    return cached.payload;
-  }
-
-  console.log("[DEBUG][CACHE] ⬇️ geoCache 다운로드(캐시 MISS/변경):", geoFileName);
-
-  const { data: cacheBlob, error } = await supabase.storage
-    .from(bucket)
-    .download(geoFileName);
-
-  if (error) {
-    // geoCache가 없으면 빈 객체
-    console.warn("[DEBUG][CACHE] ❌ geoCache 없음:", geoFileName);
-    return {};
-  }
-
-  const arrayBuffer = await cacheBlob.arrayBuffer();
-  const text = new TextDecoder("utf-8").decode(arrayBuffer);
-
-  let parsed = {};
-  try {
-    parsed = JSON.parse(text);
-  } catch (e) {
-    console.error("[ERROR][CACHE] geoCache JSON 파싱 실패:", e?.message);
-    return {};
-  }
-
-  // 기존 코드의 "중첩 언랩" 유지
-  let unwrapDepth = 0;
-  while (
-    parsed &&
-    typeof parsed === "object" &&
-    Object.keys(parsed).length === 1 &&
-    typeof parsed[Object.keys(parsed)[0]] === "object"
-  ) {
-    parsed = parsed[Object.keys(parsed)[0]];
-    unwrapDepth++;
-  }
-  if (unwrapDepth > 0) {
-    console.log(`[DEBUG][CACHE] ⚙️ 중첩 구조 ${unwrapDepth}회 언랩 처리됨`);
-  }
-
-  // key 정리(공백 정규화)
-  const cleanedCache = {};
-  Object.entries(parsed || {}).forEach(([k, v]) => {
-    const cleanKey = String(k).trim().replace(/\s+/g, " ");
-    cleanedCache[cleanKey] = v;
-  });
-
-  await idbPut({
-    key: cacheKey,
-    stamp,
-    saved_at: new Date().toISOString(),
-    payload: cleanedCache,
-  });
-
-  return cleanedCache;
-};
-
-
 
 
 function App() {
@@ -246,19 +43,6 @@ function App() {
   const [counts, setCounts] = useState({ 완료: 0, 불가: 0, 미방문: 0 });
   const [mapType, setMapType] = useState("ROADMAP");
   const otherUserOverlays = useRef([]);
-  // ✅ 관리자 오버레이: uid -> { overlay, el }
-  const otherUserOverlayMapRef = useRef(new Map());
-  // ✅ since 커서(마지막으로 본 updated_at)
-  const otherUsersSinceRef = useRef(null);
-
-  // ✅ 좌표 키(부동소수 오차 방지)
-  const coordKey = (lat, lng) =>
-  `${Number(lat).toFixed(6)},${Number(lng).toFixed(6)}`;
-  
-  // ✅ 상태 -> 색
-  const statusToColor = (status) =>
-    status === "완료" ? "green" : status === "불가" ? "red" : "blue";
-
   const [geoCache, setGeoCache] = useState({});
   // 🔹 주소 라벨 오버레이들 저장
   const addressOverlaysRef = useRef([]);
@@ -279,19 +63,6 @@ function App() {
 
   // 🔹 마커 오버레이들을 유지하기 위한 ref
   const markersRef = useRef([]);
-
-    // ✅ (추가) 전체 마커는 최초 1회만 그리기 위한 플래그
-  const markersBootstrappedRef = useRef(false);
-
-  // ✅ 좌표키 -> 마커 DOM (색만 빠르게 바꾸기)
-const markerElByCoordRef = useRef(new Map());
-
-// ✅ meters 변경분 폴링용 since 커서
-const metersSinceRef = useRef(null);
-
-// ✅ 폴링 중복 호출 방지
-const metersPollInFlightRef = useRef(false);
-
 
   // ✅ 최신 data를 이벤트 핸들러에서 안전하게 쓰기 위한 ref
 const dataRef = useRef([]);
@@ -359,7 +130,6 @@ const { data: chunkRows, error } = await supabase
   );
 };
 
-  
 
   // activeOverlay 는 지금처럼 window 전역 써도 OK
   const getActiveOverlay = () => window.__activeOverlayRef || null;
@@ -459,74 +229,73 @@ const { data: chunkRows, error } = await supabase
   }, [loggedIn]);
 
   /** Excel 데이터 로드 **/
-const loadData = async (fileName) => {
-  try {
-    console.log("[DEBUG][DATA] 📂 엑셀 로드 시작:", fileName);
-
-    // ✅ (변경) Excel은 캐시 우선 (baseData만 캐시)
-    const baseData = await loadExcelBaseDataCached(fileName);
-    console.log("[DEBUG][DATA] 📊 엑셀 baseData:", baseData.length, "행");
-
-    // ✅ DB에서 최신 상태를 "엑셀에 있는 meter_id들만" 읽어오기 (전체 select(*) 금지)
-    const excelIds = baseData
-      .map((x) => normalizeMeterId(x.meter_id))
-      .filter(Boolean);
-
-    const columns = "meter_id,status,updated_at";
-    let rows = [];
-
-    for (const part of chunkArray(excelIds, 500)) {
-      const { data: chunkRows, error } = await supabase
-        .from("meters")
-        .select(columns)
-        .eq("data_file", fileName)
-        .in("meter_id", part);
-
+  const loadData = async (fileName) => {
+    try {
+      console.log("[DEBUG][DATA] 📂 엑셀 로드 시작:", fileName);
+      const { data: excelBlob, error } = await supabase.storage
+        .from("excels")
+        .download(fileName);
       if (error) throw error;
-      rows = rows.concat(chunkRows || []);
-    }
 
-    // ✅ (중요) 최초 폴링이 "전체 meters"를 뽑지 않도록 커서 시작점 잡기
-    const maxUpdatedAt = (rows || []).reduce((m, r) => {
-      if (!r?.updated_at) return m;
-      if (!m) return r.updated_at;
-      return new Date(r.updated_at) > new Date(m) ? r.updated_at : m;
-    }, null);
-    metersSinceRef.current = maxUpdatedAt || new Date().toISOString();
+      const blob = await excelBlob.arrayBuffer();
+      const workbook = XLSX.read(blob, { type: "array" });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const json = XLSX.utils.sheet_to_json(sheet);
+      console.log("[DEBUG][DATA] 📊 엑셀 데이터:", json.length, "행");
+
+      // 1) 엑셀에서는 상태(status)를 더 이상 쓰지 않음
+      const baseData = json.map((r) => ({
+        meter_id: normalizeMeterId(r["계기번호"]),
+        address: r["주소"],
+        comm_type: r["통신방식"] || "", // 예: KS-PLC, LTE
+        list_no: r["리스트번호"] || "", // 예: 5131, 5152
+      }));
+
+      // ✅ 2) DB에서 최신 상태를 "엑셀에 있는 meter_id들만" 읽어오기 (전체 select(*) 금지)
+const excelIds = baseData.map((x) => normalizeMeterId(x.meter_id)).filter(Boolean);
+
+const columns = "meter_id,status,updated_at";
+let rows = [];
+for (const part of chunkArray(excelIds, 500)) {
+  const { data: chunkRows, error } = await supabase
+  .from("meters")
+  .select(columns)
+  .eq("data_file", fileName)
+  .in("meter_id", part);
 
 
-    const latestMap = {};
-    rows.forEach((d) => {
-      const key = normalizeMeterId(d.meter_id);
-      if (
-        !latestMap[key] ||
-        new Date(d.updated_at) > new Date(latestMap[key].updated_at)
-      ) {
-        latestMap[key] = d;
-      }
-    });
+  if (error) throw error;
+  rows = rows.concat(chunkRows || []);
+}
 
-    // 상태는 "DB 값 > 없으면 미방문"
-    const merged = baseData.map((x) => {
-      const key = normalizeMeterId(x.meter_id);
-      const m = latestMap[key];
-      return {
-        ...x,
-        status: m?.status || "미방문",
-      };
-    });
-
-    
-
-    setData(merged);
-
-    console.log("[DEBUG][DATA] ✅ 병합 완료:", merged.length);
-    setTimeout(() => renderMarkers(), 400);
-  } catch (e) {
-    console.error("[ERROR][DATA] 엑셀 로드 실패:", e.message);
+const latestMap = {};
+rows.forEach((d) => {
+  const key = normalizeMeterId(d.meter_id);
+  if (!latestMap[key] || new Date(d.updated_at) > new Date(latestMap[key].updated_at)) {
+    latestMap[key] = d;
   }
-};
+});
 
+
+
+      // 3) 상태는 "DB 값 > 없으면 미방문" 이라는 한 가지 규칙만 사용
+      const merged = baseData.map((x) => {
+        const key = normalizeMeterId(x.meter_id);
+        const m = latestMap[key];
+        return {
+          ...x,
+          status: m?.status || "미방문",
+        };
+      });
+
+      setData(merged);
+
+      console.log("[DEBUG][DATA] ✅ 병합 완료:", merged.length);
+      setTimeout(() => renderMarkers(), 400);
+    } catch (e) {
+      console.error("[ERROR][DATA] 엑셀 로드 실패:", e.message);
+    }
+  };
 
   /** Kakao 지도 초기화 **/
   useEffect(() => {
@@ -550,31 +319,141 @@ const loadData = async (fileName) => {
     document.head.appendChild(script);
   }, [loggedIn]);
 
-  /** Supabase에서 geoCache 파일 로드 (지오코딩 결과 JSON) **/
+  // ✅ 지도 이동/줌 종료 시: 화면(bounds) 안에 있는 계기들만 상태 동기화 (디바운스)
 useEffect(() => {
-  if (!loggedIn || !currentUser) return;
+  if (!map || !window.kakao?.maps) return;
 
-  const run = async () => {
-    try {
-      console.log(`[DEBUG][CACHE] 📦 geoCache 로드 시작: ${GEO_CACHE_FILE}`);
+  const syncInView = async () => {
+    console.count("[DEBUG][FETCH] sync in view"); // ✅ 호출 추적
 
-      // ✅ (변경) geoCache는 캐시 우선
-      const cacheObj = await loadGeoCacheCached(GEO_CACHE_FILE);
+    const b = map.getBounds();
+    const sw = b.getSouthWest();
+    const ne = b.getNorthEast();
 
-      const keyCount = Object.keys(cacheObj || {}).length;
-      console.log(`[DEBUG][CACHE] ✅ geoCache 준비 완료: ${keyCount}개`);
+    const swLat = sw.getLat();
+    const swLng = sw.getLng();
+    const neLat = ne.getLat();
+    const neLng = ne.getLng();
 
-      setGeoCache(cacheObj || {});
-      setTimeout(() => renderMarkers(), 800);
-    } catch (err) {
-      console.error("[ERROR][CACHE] geoCache 로드 실패:", err?.message);
-      setGeoCache({});
+    // ✅ 현재 화면에 보이는 meter_id만 추림 (엑셀 좌표 기준)
+    const visibleIds = [];
+    for (const row of dataRef.current) {
+      if (row.lat == null || row.lng == null) continue;
+      if (
+        row.lat >= swLat && row.lat <= neLat &&
+        row.lng >= swLng && row.lng <= neLng
+      ) {
+        visibleIds.push(row.meter_id);
+      }
     }
+
+    await fetchLatestStatus(visibleIds);
   };
 
-  run();
-}, [loggedIn, currentUser, GEO_CACHE_FILE]);
+  const debounced = debounce(syncInView, 400);
 
+  const onDragEnd = () => debounced();
+  const onZoomChanged = () => debounced();
+
+  window.kakao.maps.event.addListener(map, "dragend", onDragEnd);
+  window.kakao.maps.event.addListener(map, "zoom_changed", onZoomChanged);
+
+  // 최초 1회
+  debounced();
+
+  return () => {
+    window.kakao.maps.event.removeListener(map, "dragend", onDragEnd);
+    window.kakao.maps.event.removeListener(map, "zoom_changed", onZoomChanged);
+  };
+}, [map]);
+
+
+  /** Supabase에서 geoCache 파일 로드 (지오코딩 결과 JSON) **/
+  useEffect(() => {
+    if (!loggedIn || !currentUser) return;
+
+    const loadGeoCache = async () => {
+      try {
+        console.log(`[DEBUG][CACHE] 📦 캐시 불러오기 시도: ${GEO_CACHE_FILE}`);
+        const { data: cacheBlob, error } = await supabase.storage
+          .from("excels")
+          .download(GEO_CACHE_FILE);
+
+        if (error) {
+          console.warn("[DEBUG][CACHE] ❌ 캐시 없음 — 새로 생성 예정");
+          setGeoCache({});
+          return;
+        }
+
+        console.log(
+          `[DEBUG][CACHE] ✅ Blob 수신 완료 — 크기: ${cacheBlob.size.toLocaleString()} bytes`
+        );
+
+        const arrayBuffer = await cacheBlob.arrayBuffer();
+        console.log(
+          `[DEBUG][CACHE] ✅ ArrayBuffer 생성 완료 — 길이: ${arrayBuffer.byteLength.toLocaleString()}`
+        );
+
+        const decoder = new TextDecoder("utf-8");
+        const text = decoder.decode(arrayBuffer);
+        console.log(
+          `[DEBUG][CACHE] ✅ TextDecoder 변환 완료 — 문자열 길이: ${text.length.toLocaleString()}`
+        );
+
+        console.log("[DEBUG][CACHE] 📄 JSON 시작 부분 미리보기 ↓");
+        console.log(text.slice(0, 300));
+        console.log("[DEBUG][CACHE] 📄 JSON 끝 부분 미리보기 ↓");
+        console.log(text.slice(-300));
+
+        let parsed;
+        try {
+          parsed = JSON.parse(text);
+        } catch (err) {
+          console.error("[ERROR][CACHE] ❌ JSON 파싱 실패:", err.message);
+          console.log("[DEBUG][CACHE] ⚠️ 텍스트 일부:", text.slice(0, 500));
+          return;
+        }
+
+        let unwrapDepth = 0;
+        while (
+          Object.keys(parsed).length === 1 &&
+          typeof parsed[Object.keys(parsed)[0]] === "object"
+        ) {
+          parsed = parsed[Object.keys(parsed)[0]];
+          unwrapDepth++;
+        }
+
+        if (unwrapDepth > 0) {
+          console.log(`[DEBUG][CACHE] ⚙️ 중첩 구조 ${unwrapDepth}회 언랩 처리됨`);
+        }
+
+        const keyCount = Object.keys(parsed).length;
+        console.log(`[DEBUG][CACHE] ✅ ${keyCount}개 캐시 로드`);
+
+        if (keyCount < 50) {
+          console.warn(
+            "[WARN][CACHE] ⚠️ 캐시 수가 비정상적으로 적음 — JSON 일부만 읽혔을 수 있음"
+          );
+        }
+
+        const sampleKeys = Object.keys(parsed).slice(0, 5);
+        console.log("[DEBUG][CACHE] 🔍 샘플 키 5개:", sampleKeys);
+
+        const cleanedCache = {};
+        Object.entries(parsed).forEach(([k, v]) => {
+          const cleanKey = k.trim().replace(/\s+/g, " ");
+          cleanedCache[cleanKey] = v;
+        });
+        setGeoCache(cleanedCache);
+
+        setTimeout(() => renderMarkers(), 800);
+      } catch (err) {
+        console.error("[ERROR][CACHE] 캐시 로드 실패:", err.message);
+      }
+    };
+
+    loadGeoCache();
+  }, [loggedIn, currentUser]);
 
   /** 주소 → 좌표 변환 (Python 캐시만 사용, Kakao 지오코딩 호출 X) **/
   const geocodeAddress = async (address) => {
@@ -625,133 +504,6 @@ const fetchLatestStatus = async (meterIds = null) => {
     console.error("[ERROR][SYNC] 상태 갱신 실패:", err.message);
   }
 };
-
-  // ✅ 다른 유저가 바꾼 상태도 자동 반영 (변경분만 since로)
-const pollMetersChangesSince = async () => {
-  const dataFile = currentUser?.data_file;
-  if (!dataFile || !map) return;
-
-  if (metersPollInFlightRef.current) return;
-  metersPollInFlightRef.current = true;
-
-  try {
-    // cursor가 없으면 "지금"으로 시작 (전체 덤프 방지)
-    if (!metersSinceRef.current) {
-      metersSinceRef.current = new Date().toISOString();
-    }
-
-    let q = supabase
-      .from("meters")
-      .select("meter_id,status,updated_at,lat,lng")
-      .eq("data_file", dataFile)
-      .order("updated_at", { ascending: true })
-      .limit(1000);
-
-    // ✅ 변경분만
-    q = q.gt("updated_at", metersSinceRef.current);
-
-    const { data: rows, error } = await q;
-    if (error) throw error;
-
-    const list = rows || [];
-    if (list.length === 0) return;
-
-    // meter_id별 최신만
-    const latestByMeter = new Map();
-    let maxTs = new Date(metersSinceRef.current).getTime();
-
-    for (const r of list) {
-      const id = normalizeMeterId(r.meter_id);
-      if (!id) continue;
-
-      const prev = latestByMeter.get(id);
-      if (!prev || new Date(r.updated_at) > new Date(prev.updated_at)) {
-        latestByMeter.set(id, r);
-      }
-
-      const t = new Date(r.updated_at).getTime();
-      if (Number.isFinite(t) && t > maxTs) maxTs = t;
-    }
-
-    // ✅ data 상태 반영 + 카운트 갱신
-    setData((prev) => {
-      let changed = false;
-
-      const next = prev.map((row) => {
-        const id = normalizeMeterId(row.meter_id);
-        const m = latestByMeter.get(id);
-        if (!m) return row;
-
-        const nextStatus = m.status || "미방문";
-        if (nextStatus !== row.status) {
-          changed = true;
-          return { ...row, status: nextStatus };
-        }
-        return row;
-      });
-
-      if (changed) {
-        const c = { 완료: 0, 불가: 0, 미방문: 0 };
-        next.forEach((r) => {
-          c[r.status] = (c[r.status] || 0) + 1;
-        });
-        setCounts(c);
-      }
-      return next;
-    });
-
-    // ✅ 마커 색 “부분 업데이트”(해당 좌표만)
-    const latestByCoord = new Map(); // coordKey -> row
-    for (const r of latestByMeter.values()) {
-      let lat = r.lat;
-      let lng = r.lng;
-
-      // DB에 lat/lng가 없을 수도 있으면 로컬 data에서 보정
-      if (lat == null || lng == null) {
-        const local = dataRef.current.find(
-          (d) => normalizeMeterId(d.meter_id) === normalizeMeterId(r.meter_id)
-        );
-        lat = local?.lat;
-        lng = local?.lng;
-      }
-
-      if (lat == null || lng == null) continue;
-
-      const key = coordKey(lat, lng);
-      const prev = latestByCoord.get(key);
-      if (!prev || new Date(r.updated_at) > new Date(prev.updated_at)) {
-        latestByCoord.set(key, r);
-      }
-    }
-
-    latestByCoord.forEach((r, key) => {
-      const el = markerElByCoordRef.current.get(key);
-      if (!el) return; // 필터로 안 그려진 경우 등
-      el.style.background = statusToColor(r.status);
-      el.style.transition = "background 0.3s ease";
-    });
-
-    if (maxTs > 0) metersSinceRef.current = new Date(maxTs).toISOString();
-  } catch (e) {
-    console.warn("[WARN][SYNC] meters 변경분 폴링 실패:", e?.message);
-  } finally {
-    metersPollInFlightRef.current = false;
-  }
-};
-
-  // ✅ 다른 유저 변경 자동 반영 (UI 변경 없음)
-useEffect(() => {
-  if (!loggedIn || !currentUser || !map) return;
-
-  // 즉시 1회 + 이후 주기 폴링
-  pollMetersChangesSince();
-  const t = setInterval(() => {
-    pollMetersChangesSince();
-  }, 5000); // 5초(원하면 3~10초로 조절)
-
-  return () => clearInterval(t);
-}, [loggedIn, currentUser?.data_file, map]);
-
 
 
   // ✅ 거리 계산 함수 (미터 단위)
@@ -919,8 +671,6 @@ useEffect(() => {
       // 기존 마커 제거
       markersRef.current.forEach((m) => m.setMap(null));
       markersRef.current = [];
-      markerElByCoordRef.current.clear();
-
 
       // 🔹 기존 주소 라벨 제거
       addressOverlaysRef.current.forEach((ov) => ov.setMap(null));
@@ -1030,8 +780,6 @@ useEffect(() => {
         overlay.setMap(map);
         markersRef.current.push(overlay);
         markerCount++;
-        markerElByCoordRef.current.set(coordKey(coords.lat, coords.lng), markerEl);
-
 
         // 🔹 현재 지도 레벨 기준으로 라벨 표시 여부 결정
         const currentLevel = map.getLevel();
@@ -1103,6 +851,7 @@ useEffect(() => {
             if (ov) {
               ov.setMap(null);
               setActiveOverlay(null);
+              activeOverlay = null;
               console.log("[DEBUG][POPUP] ✕ 버튼 클릭 — 팝업 닫힘");
             }
           });
@@ -1251,9 +1000,6 @@ useEffect(() => {
 
   /** ✅ 마커 렌더링 자동 트리거 (지도, 데이터, geoCache 모두 준비된 뒤 실행) **/
   useEffect(() => {
-
-    if (markersBootstrappedRef.current) return; // ✅ (추가) 이후엔 전체 렌더 금지
-    
     let checkCount = 0;
     const maxWait = 50; // 최대 5초까지 대기
 
@@ -1292,7 +1038,6 @@ useEffect(() => {
       }
 
       console.log("[DEBUG][MAP] ✅ 모든 요소 준비 완료 → 마커 렌더링 실행");
-      markersBootstrappedRef.current = true;   // ✅ 이 줄 추가 (진짜 핵심)
       await renderMarkers();
     };
 
@@ -1363,12 +1108,13 @@ await fetchLatestStatus(payload.map((p) => p.meter_id));
       // 전체 재렌더 대신 근처 마커 색만 빠르게 업데이트
       renderMarkersPartial(coords, newStatus);
 
-      if (currentUser.can_view_others) await loadOtherUserLocations(false);
+      if (currentUser.can_view_others) await loadOtherUserLocations();
 
       const overlay = getActiveOverlay();
       if (overlay) {
         overlay.setMap(null);
         setActiveOverlay(null);
+        activeOverlay = null;
       }
 
       console.log("[DEBUG][STATUS] 🔁 전체 지도 최신화 완료");
@@ -1377,50 +1123,31 @@ await fetchLatestStatus(payload.map((p) => p.meter_id));
     }
   };
 
-  /** 관리자 모드: 다른 사용자 위치 불러오기 (view + since 커서) **/
-const loadOtherUserLocations = async (forceFull = false) => {
-  if (!map) return;
+  /** 관리자 모드: 다른 사용자 위치 불러오기 **/
+  const loadOtherUserLocations = async () => {
+    if (!map) return;
 
-  const isAdmin =
-    currentUser?.can_view_others === true || currentUser?.can_view_others === "y";
-  if (!isAdmin) return;
+    // 기존 관리자 오버레이 제거
+    otherUserOverlays.current.forEach((ov) => ov.setMap(null));
+    otherUserOverlays.current = [];
 
-  if (forceFull) {
-    otherUsersSinceRef.current = null;
-  }
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
-  try {
-    let q = supabase
-      .from("user_last_locations_latest") // ✅ 뷰 이름
-      .select("user_id,address,lat,lng,updated_at");
+    const { data: logs, error } = await supabase
+      .from("user_last_locations")
+      .select("user_id, address, lat, lng, status, updated_at, data_file");
 
-    // ✅ since 커서 적용 (다음 폴링부터는 변경분만)
-    if (otherUsersSinceRef.current) {
-      q = q.gt("updated_at", otherUsersSinceRef.current);
-    }
-
-    const { data: rows, error } = await q;
     if (error) throw error;
 
-    const list = rows || [];
-    if (list.length === 0) return;
+    const latest = {};
+    logs.forEach((l) => {
+      if (!l.user_id || !l.lat || !l.lng) return;
+      if (!latest[l.user_id]) latest[l.user_id] = l;
+    });
 
-    // since 커서 갱신(가장 최신 updated_at)
-    let maxTs = otherUsersSinceRef.current
-      ? new Date(otherUsersSinceRef.current).getTime()
-      : 0;
-
-    const upsertOverlay = (uid, loc) => {
+    Object.keys(latest).forEach((uid) => {
+      const loc = latest[uid];
       const coord = new window.kakao.maps.LatLng(loc.lat, loc.lng);
-
-      const existing = otherUserOverlayMapRef.current.get(uid);
-      if (existing?.overlay) {
-        existing.overlay.setPosition(coord);
-        existing.el.dataset.lat = String(loc.lat);
-        existing.el.dataset.lng = String(loc.lng);
-        existing.el.dataset.label = String(loc.address || uid);
-        return;
-      }
 
       const markerEl = document.createElement("div");
       markerEl.style.cssText = `
@@ -1432,20 +1159,20 @@ const loadOtherUserLocations = async (forceFull = false) => {
         font-size:11px;
         box-shadow:0 0 6px rgba(0,0,0,0.4);
         text-shadow:0 0 3px black;
-        cursor:pointer;
+        cursor:pointer;          /* 👉 클릭 가능 느낌 */
       `;
       markerEl.textContent = uid;
 
-      markerEl.dataset.lat = String(loc.lat);
-      markerEl.dataset.lng = String(loc.lng);
-      markerEl.dataset.label = String(loc.address || uid);
-
+      // 👉 이름(보라색 박스) 클릭하면 해당 위치로 카카오 길찾기
       markerEl.addEventListener("click", (e) => {
         e.stopPropagation();
-        const label = markerEl.dataset.label || uid;
-        const lat = markerEl.dataset.lat;
-        const lng = markerEl.dataset.lng;
-        const url = `https://map.kakao.com/link/to/${encodeURIComponent(label)},${lat},${lng}`;
+
+        const label = loc.address || uid; // 주소가 있으면 주소, 없으면 유저ID
+
+        const url = `https://map.kakao.com/link/to/${encodeURIComponent(
+          label
+        )},${loc.lat},${loc.lng}`;
+
         window.open(url, "_blank");
       });
 
@@ -1455,55 +1182,9 @@ const loadOtherUserLocations = async (forceFull = false) => {
         yAnchor: 2.5,
       });
       overlay.setMap(map);
-
-      otherUserOverlayMapRef.current.set(uid, { overlay, el: markerEl });
-    };
-
-    for (const loc of list) {
-      if (!loc?.user_id || loc.lat == null || loc.lng == null) continue;
-
-      const t = new Date(loc.updated_at).getTime();
-      if (Number.isFinite(t) && t > maxTs) maxTs = t;
-
-      upsertOverlay(String(loc.user_id), loc);
-    }
-
-    if (maxTs > 0) {
-      otherUsersSinceRef.current = new Date(maxTs).toISOString();
-    }
-  } catch (e) {
-    console.error("[ERROR][ADMIN] 다른 유저 위치 로드 실패:", e?.message);
-  }
-};
-
-
-  
-// ✅ 관리자 계정일 때만: 다른 유저 마지막 위치를 주기적으로 갱신 (폴링 유지, egress 최소화)
-useEffect(() => {
-  if (!map) return;
-
-  const isAdmin =
-    currentUser?.can_view_others === true || currentUser?.can_view_others === "y";
-
-  // 관리자 아니면 오버레이 정리
-  if (!isAdmin) {
-    otherUsersSinceRef.current = null;
-    otherUserOverlayMapRef.current.forEach((v) => v?.overlay?.setMap(null));
-    otherUserOverlayMapRef.current.clear();
-    return;
-  }
-
-  // 최초 1회는 전체 로드
-  loadOtherUserLocations(true);
-
-  const t = setInterval(() => {
-    loadOtherUserLocations(false); // 이후엔 since 커서로 변경분만
-  }, 20000);
-
-  return () => clearInterval(t);
-}, [map, currentUser?.id, currentUser?.can_view_others]);
-
-
+      otherUserOverlays.current.push(overlay);
+    });
+  };
 
   /** 🔴 내 위치 실시간 추적 (빨간 동그라미, 나만 보임) **/
   useEffect(() => {
