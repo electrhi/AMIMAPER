@@ -33,6 +33,7 @@ const chunkArray = (arr, size = 500) => {
 
 
 
+
 function App() {
   const [user, setUser] = useState("");
   const [password, setPassword] = useState("");
@@ -130,6 +131,7 @@ const { data: chunkRows, error } = await supabase
   );
 };
 
+  
 
   // activeOverlay 는 지금처럼 window 전역 써도 OK
   const getActiveOverlay = () => window.__activeOverlayRef || null;
@@ -318,55 +320,6 @@ rows.forEach((d) => {
     };
     document.head.appendChild(script);
   }, [loggedIn]);
-
-  // ✅ 지도 이동/줌 종료 시: 화면(bounds) 안에 있는 계기들만 상태 동기화 (디바운스)
-useEffect(() => {
-  if (!map || !window.kakao?.maps) return;
-
-  const syncInView = async () => {
-    console.count("[DEBUG][FETCH] sync in view"); // ✅ 호출 추적
-
-    const b = map.getBounds();
-    const sw = b.getSouthWest();
-    const ne = b.getNorthEast();
-
-    const swLat = sw.getLat();
-    const swLng = sw.getLng();
-    const neLat = ne.getLat();
-    const neLng = ne.getLng();
-
-    // ✅ 현재 화면에 보이는 meter_id만 추림 (엑셀 좌표 기준)
-    const visibleIds = [];
-    for (const row of dataRef.current) {
-      if (row.lat == null || row.lng == null) continue;
-      if (
-        row.lat >= swLat && row.lat <= neLat &&
-        row.lng >= swLng && row.lng <= neLng
-      ) {
-        visibleIds.push(row.meter_id);
-      }
-    }
-
-    await fetchLatestStatus(visibleIds);
-  };
-
-  const debounced = debounce(syncInView, 400);
-
-  const onDragEnd = () => debounced();
-  const onZoomChanged = () => debounced();
-
-  window.kakao.maps.event.addListener(map, "dragend", onDragEnd);
-  window.kakao.maps.event.addListener(map, "zoom_changed", onZoomChanged);
-
-  // 최초 1회
-  debounced();
-
-  return () => {
-    window.kakao.maps.event.removeListener(map, "dragend", onDragEnd);
-    window.kakao.maps.event.removeListener(map, "zoom_changed", onZoomChanged);
-  };
-}, [map]);
-
 
   /** Supabase에서 geoCache 파일 로드 (지오코딩 결과 JSON) **/
   useEffect(() => {
@@ -1124,67 +1077,90 @@ await fetchLatestStatus(payload.map((p) => p.meter_id));
   };
 
   /** 관리자 모드: 다른 사용자 위치 불러오기 **/
-  const loadOtherUserLocations = async () => {
-    if (!map) return;
+const loadOtherUserLocations = async () => {
+  if (!map) return;
 
-    // 기존 관리자 오버레이 제거
-    otherUserOverlays.current.forEach((ov) => ov.setMap(null));
-    otherUserOverlays.current = [];
 
-    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  // 기존 관리자 오버레이 제거
+  otherUserOverlays.current.forEach((ov) => ov.setMap(null));
+  otherUserOverlays.current = [];
 
-    const { data: logs, error } = await supabase
-      .from("user_last_locations")
-      .select("user_id, address, lat, lng, status, updated_at, data_file");
+  // ✅ 최근 N일만 (너무 짧으면 안 보일 수 있으니 7일 추천)
+  const since = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
 
-    if (error) throw error;
+  const { data: logs, error } = await supabase
+    .from("user_last_locations")
+    .select("user_id, address, lat, lng, status, updated_at")
+    .gte("updated_at", since)
+    .order("updated_at", { ascending: false }); // 최신이 먼저 오게
 
-    const latest = {};
-    logs.forEach((l) => {
-      if (!l.user_id || !l.lat || !l.lng) return;
-      if (!latest[l.user_id]) latest[l.user_id] = l;
+  if (error) throw error;
+
+  // ✅ user_id별 최신 1개만 유지 (updated_at 기준)
+  const latest = {};
+  (logs || []).forEach((l) => {
+    if (!l.user_id || l.lat == null || l.lng == null) return;
+    const prev = latest[l.user_id];
+    if (!prev || new Date(l.updated_at) > new Date(prev.updated_at)) {
+      latest[l.user_id] = l;
+    }
+  });
+
+  
+
+  Object.keys(latest).forEach((uid) => {
+    const loc = latest[uid];
+    const coord = new window.kakao.maps.LatLng(loc.lat, loc.lng);
+
+    const markerEl = document.createElement("div");
+    markerEl.style.cssText = `
+      background:purple;
+      border-radius:8px;
+      padding:4px 7px;
+      color:white;
+      font-weight:bold;
+      font-size:11px;
+      box-shadow:0 0 6px rgba(0,0,0,0.4);
+      text-shadow:0 0 3px black;
+      cursor:pointer;
+    `;
+    markerEl.textContent = uid;
+
+    markerEl.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const label = loc.address || uid;
+      const url = `https://map.kakao.com/link/to/${encodeURIComponent(label)},${loc.lat},${loc.lng}`;
+      window.open(url, "_blank");
     });
 
-    Object.keys(latest).forEach((uid) => {
-      const loc = latest[uid];
-      const coord = new window.kakao.maps.LatLng(loc.lat, loc.lng);
-
-      const markerEl = document.createElement("div");
-      markerEl.style.cssText = `
-        background:purple;
-        border-radius:8px;
-        padding:4px 7px;
-        color:white;
-        font-weight:bold;
-        font-size:11px;
-        box-shadow:0 0 6px rgba(0,0,0,0.4);
-        text-shadow:0 0 3px black;
-        cursor:pointer;          /* 👉 클릭 가능 느낌 */
-      `;
-      markerEl.textContent = uid;
-
-      // 👉 이름(보라색 박스) 클릭하면 해당 위치로 카카오 길찾기
-      markerEl.addEventListener("click", (e) => {
-        e.stopPropagation();
-
-        const label = loc.address || uid; // 주소가 있으면 주소, 없으면 유저ID
-
-        const url = `https://map.kakao.com/link/to/${encodeURIComponent(
-          label
-        )},${loc.lat},${loc.lng}`;
-
-        window.open(url, "_blank");
-      });
-
-      const overlay = new window.kakao.maps.CustomOverlay({
-        position: coord,
-        content: markerEl,
-        yAnchor: 2.5,
-      });
-      overlay.setMap(map);
-      otherUserOverlays.current.push(overlay);
+    const overlay = new window.kakao.maps.CustomOverlay({
+      position: coord,
+      content: markerEl,
+      yAnchor: 2.5,
     });
-  };
+    overlay.setMap(map);
+    otherUserOverlays.current.push(overlay);
+  });
+};
+
+  
+// ✅ 관리자 계정일 때만: 다른 유저 마지막 위치를 주기적으로 갱신
+useEffect(() => {
+  if (!map) return;
+
+  const isAdmin =
+    currentUser?.can_view_others === true || currentUser?.can_view_others === "y";
+  if (!isAdmin) return;
+
+  loadOtherUserLocations(); // 최초 1회
+
+  const t = setInterval(() => {
+    loadOtherUserLocations();
+  }, 20000);
+
+  return () => clearInterval(t);
+}, [map, currentUser?.id, currentUser?.can_view_others]);
+
 
   /** 🔴 내 위치 실시간 추적 (빨간 동그라미, 나만 보임) **/
   useEffect(() => {
