@@ -251,6 +251,14 @@ function App() {
   // ✅ since 커서(마지막으로 본 updated_at)
   const otherUsersSinceRef = useRef(null);
 
+  // ✅ 좌표 키(부동소수 오차 방지)
+  const coordKey = (lat, lng) =>
+  `${Number(lat).toFixed(6)},${Number(lng).toFixed(6)}`;
+  
+  // ✅ 상태 -> 색
+  const statusToColor = (status) =>
+    status === "완료" ? "green" : status === "불가" ? "red" : "blue";
+
   const [geoCache, setGeoCache] = useState({});
   // 🔹 주소 라벨 오버레이들 저장
   const addressOverlaysRef = useRef([]);
@@ -271,6 +279,19 @@ function App() {
 
   // 🔹 마커 오버레이들을 유지하기 위한 ref
   const markersRef = useRef([]);
+
+    // ✅ (추가) 전체 마커는 최초 1회만 그리기 위한 플래그
+  const markersBootstrappedRef = useRef(false);
+
+  // ✅ 좌표키 -> 마커 DOM (색만 빠르게 바꾸기)
+const markerElByCoordRef = useRef(new Map());
+
+// ✅ meters 변경분 폴링용 since 커서
+const metersSinceRef = useRef(null);
+
+// ✅ 폴링 중복 호출 방지
+const metersPollInFlightRef = useRef(false);
+
 
   // ✅ 최신 data를 이벤트 핸들러에서 안전하게 쓰기 위한 ref
 const dataRef = useRef([]);
@@ -465,6 +486,15 @@ const loadData = async (fileName) => {
       rows = rows.concat(chunkRows || []);
     }
 
+    // ✅ (중요) 최초 폴링이 "전체 meters"를 뽑지 않도록 커서 시작점 잡기
+    const maxUpdatedAt = (rows || []).reduce((m, r) => {
+      if (!r?.updated_at) return m;
+      if (!m) return r.updated_at;
+      return new Date(r.updated_at) > new Date(m) ? r.updated_at : m;
+    }, null);
+    metersSinceRef.current = maxUpdatedAt || new Date().toISOString();
+
+
     const latestMap = {};
     rows.forEach((d) => {
       const key = normalizeMeterId(d.meter_id);
@@ -485,6 +515,8 @@ const loadData = async (fileName) => {
         status: m?.status || "미방문",
       };
     });
+
+    
 
     setData(merged);
 
@@ -593,6 +625,133 @@ const fetchLatestStatus = async (meterIds = null) => {
     console.error("[ERROR][SYNC] 상태 갱신 실패:", err.message);
   }
 };
+
+  // ✅ 다른 유저가 바꾼 상태도 자동 반영 (변경분만 since로)
+const pollMetersChangesSince = async () => {
+  const dataFile = currentUser?.data_file;
+  if (!dataFile || !map) return;
+
+  if (metersPollInFlightRef.current) return;
+  metersPollInFlightRef.current = true;
+
+  try {
+    // cursor가 없으면 "지금"으로 시작 (전체 덤프 방지)
+    if (!metersSinceRef.current) {
+      metersSinceRef.current = new Date().toISOString();
+    }
+
+    let q = supabase
+      .from("meters")
+      .select("meter_id,status,updated_at,lat,lng")
+      .eq("data_file", dataFile)
+      .order("updated_at", { ascending: true })
+      .limit(1000);
+
+    // ✅ 변경분만
+    q = q.gt("updated_at", metersSinceRef.current);
+
+    const { data: rows, error } = await q;
+    if (error) throw error;
+
+    const list = rows || [];
+    if (list.length === 0) return;
+
+    // meter_id별 최신만
+    const latestByMeter = new Map();
+    let maxTs = new Date(metersSinceRef.current).getTime();
+
+    for (const r of list) {
+      const id = normalizeMeterId(r.meter_id);
+      if (!id) continue;
+
+      const prev = latestByMeter.get(id);
+      if (!prev || new Date(r.updated_at) > new Date(prev.updated_at)) {
+        latestByMeter.set(id, r);
+      }
+
+      const t = new Date(r.updated_at).getTime();
+      if (Number.isFinite(t) && t > maxTs) maxTs = t;
+    }
+
+    // ✅ data 상태 반영 + 카운트 갱신
+    setData((prev) => {
+      let changed = false;
+
+      const next = prev.map((row) => {
+        const id = normalizeMeterId(row.meter_id);
+        const m = latestByMeter.get(id);
+        if (!m) return row;
+
+        const nextStatus = m.status || "미방문";
+        if (nextStatus !== row.status) {
+          changed = true;
+          return { ...row, status: nextStatus };
+        }
+        return row;
+      });
+
+      if (changed) {
+        const c = { 완료: 0, 불가: 0, 미방문: 0 };
+        next.forEach((r) => {
+          c[r.status] = (c[r.status] || 0) + 1;
+        });
+        setCounts(c);
+      }
+      return next;
+    });
+
+    // ✅ 마커 색 “부분 업데이트”(해당 좌표만)
+    const latestByCoord = new Map(); // coordKey -> row
+    for (const r of latestByMeter.values()) {
+      let lat = r.lat;
+      let lng = r.lng;
+
+      // DB에 lat/lng가 없을 수도 있으면 로컬 data에서 보정
+      if (lat == null || lng == null) {
+        const local = dataRef.current.find(
+          (d) => normalizeMeterId(d.meter_id) === normalizeMeterId(r.meter_id)
+        );
+        lat = local?.lat;
+        lng = local?.lng;
+      }
+
+      if (lat == null || lng == null) continue;
+
+      const key = coordKey(lat, lng);
+      const prev = latestByCoord.get(key);
+      if (!prev || new Date(r.updated_at) > new Date(prev.updated_at)) {
+        latestByCoord.set(key, r);
+      }
+    }
+
+    latestByCoord.forEach((r, key) => {
+      const el = markerElByCoordRef.current.get(key);
+      if (!el) return; // 필터로 안 그려진 경우 등
+      el.style.background = statusToColor(r.status);
+      el.style.transition = "background 0.3s ease";
+    });
+
+    if (maxTs > 0) metersSinceRef.current = new Date(maxTs).toISOString();
+  } catch (e) {
+    console.warn("[WARN][SYNC] meters 변경분 폴링 실패:", e?.message);
+  } finally {
+    metersPollInFlightRef.current = false;
+  }
+};
+
+  // ✅ 다른 유저 변경 자동 반영 (UI 변경 없음)
+useEffect(() => {
+  if (!loggedIn || !currentUser || !map) return;
+
+  // 즉시 1회 + 이후 주기 폴링
+  pollMetersChangesSince();
+  const t = setInterval(() => {
+    pollMetersChangesSince();
+  }, 5000); // 5초(원하면 3~10초로 조절)
+
+  return () => clearInterval(t);
+}, [loggedIn, currentUser?.data_file, map]);
+
 
 
   // ✅ 거리 계산 함수 (미터 단위)
@@ -760,6 +919,8 @@ const fetchLatestStatus = async (meterIds = null) => {
       // 기존 마커 제거
       markersRef.current.forEach((m) => m.setMap(null));
       markersRef.current = [];
+      markerElByCoordRef.current.clear();
+
 
       // 🔹 기존 주소 라벨 제거
       addressOverlaysRef.current.forEach((ov) => ov.setMap(null));
@@ -869,6 +1030,8 @@ const fetchLatestStatus = async (meterIds = null) => {
         overlay.setMap(map);
         markersRef.current.push(overlay);
         markerCount++;
+        markerElByCoordRef.current.set(coordKey(coords.lat, coords.lng), markerEl);
+
 
         // 🔹 현재 지도 레벨 기준으로 라벨 표시 여부 결정
         const currentLevel = map.getLevel();
@@ -1088,6 +1251,9 @@ const fetchLatestStatus = async (meterIds = null) => {
 
   /** ✅ 마커 렌더링 자동 트리거 (지도, 데이터, geoCache 모두 준비된 뒤 실행) **/
   useEffect(() => {
+
+    if (markersBootstrappedRef.current) return; // ✅ (추가) 이후엔 전체 렌더 금지
+    
     let checkCount = 0;
     const maxWait = 50; // 최대 5초까지 대기
 
@@ -1126,6 +1292,7 @@ const fetchLatestStatus = async (meterIds = null) => {
       }
 
       console.log("[DEBUG][MAP] ✅ 모든 요소 준비 완료 → 마커 렌더링 실행");
+      markersBootstrappedRef.current = true;   // ✅ 이 줄 추가 (진짜 핵심)
       await renderMarkers();
     };
 
