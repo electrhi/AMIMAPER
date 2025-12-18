@@ -505,6 +505,35 @@ const fetchLatestStatus = async (meterIds = null) => {
   }
 };
 
+  // ✅ 현재 화면(bounds) 안에 있는 meter_id 전부 뽑기 (좌표 있는 것만)
+const getVisibleMeterIds = () => {
+  if (!map) return [];
+
+  const b = map.getBounds();
+  const sw = b.getSouthWest();
+  const ne = b.getNorthEast();
+
+  const swLat = sw.getLat();
+  const swLng = sw.getLng();
+  const neLat = ne.getLat();
+  const neLng = ne.getLng();
+
+  const ids = [];
+  for (const row of dataRef.current) {
+    if (row.lat == null || row.lng == null) continue;
+
+    if (
+      row.lat >= swLat && row.lat <= neLat &&
+      row.lng >= swLng && row.lng <= neLng
+    ) {
+      ids.push(row.meter_id);
+    }
+  }
+
+  return Array.from(new Set(ids.map(normalizeMeterId))).filter(Boolean);
+};
+
+
 
   // ✅ 거리 계산 함수 (미터 단위)
   const distanceInMeters = (lat1, lon1, lat2, lon2) => {
@@ -815,8 +844,10 @@ const fetchLatestStatus = async (meterIds = null) => {
         // 마커 클릭 시 팝업 + 상태 버튼
         const openPopup = async (e) => {
           e.stopPropagation();
-          // 여기서 최신 상태 1회 동기화 (클릭 시에만 호출)
-          await fetchLatestStatus(list.map((g) => g.meter_id));
+          // ✅ 어떤 마커를 클릭하든 "현재 화면 내 전체"를 최신화
+          const visibleIds = getVisibleMeterIds();
+          await fetchLatestStatus(visibleIds);
+
 
           const old = getActiveOverlay();
           if (old) old.setMap(null);
