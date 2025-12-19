@@ -56,7 +56,47 @@ function App() {
   // ✅ 마커 개수 필터 (입력 숫자 이상만 표시, 비어 있으면 전체)
   const [minMarkerCount, setMinMarkerCount] = useState("");
 
+    // 🔴 내 위치(방향 화살표) 엘리먼트 ref
+  const myLocationArrowElRef = useRef(null);
+
+  // 🔴 내 위치 이전값 저장(방향 계산용)
+  const myLastPosRef = useRef(null);
+  const myLastHeadingRef = useRef(null);
+
+  // ✅ 방위각 계산(0=북쪽, 90=동쪽)
+  const calcBearing = (lat1, lon1, lat2, lon2) => {
+    const toRad = (d) => (d * Math.PI) / 180;
+    const y = Math.sin(toRad(lon2 - lon1)) * Math.cos(toRad(lat2));
+    const x =
+      Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) -
+      Math.sin(toRad(lat1)) *
+        Math.cos(toRad(lat2)) *
+        Math.cos(toRad(lon2 - lon1));
+    const brng = Math.atan2(y, x);
+    return ((brng * 180) / Math.PI + 360) % 360;
+  };
+
+
   console.log("[DEBUG][SUPABASE_URL]", SUPABASE_URL);
+
+    // ➕ 임의 마커 추가 모드
+  const [isAddMarkerMode, setIsAddMarkerMode] = useState(false);
+
+  // 임의 마커 데이터(로컬 저장)
+  const [customMarkers, setCustomMarkers] = useState([]);
+
+  // 지도 위에 올려진 임의 마커 객체들 보관(삭제/재렌더용)
+  const customMarkerObjsRef = useRef([]);
+
+  // 드래그 중인 임시 마커(추가 모드에서 1개만)
+  const draftMarkerRef = useRef(null);
+
+  // 텍스트 입력 오버레이
+  const customInputOverlayRef = useRef(null);
+
+  // 로컬스토리지 키(유저+엑셀별로 분리)
+  const CUSTOM_MARKERS_KEY = `amimap_custom_markers_${currentUser?.id || "anon"}_${currentUser?.data_file || "default"}`;
+
 
   // 예: 데이터 파일이 "djdemo.xlsx" 라면 geoCache 파일명은 "geoCache_djdemo.xlsx.json"
   const GEO_CACHE_FILE = `geoCache_${currentUser?.data_file || "default"}.json`;
@@ -454,6 +494,32 @@ useEffect(() => {
 
     loadGeoCache();
   }, [loggedIn, currentUser]);
+
+    // ✅ 임의 마커 로드
+  useEffect(() => {
+    if (!currentUser) return;
+    try {
+      const raw = localStorage.getItem(CUSTOM_MARKERS_KEY);
+      if (raw) setCustomMarkers(JSON.parse(raw));
+      else setCustomMarkers([]);
+    } catch (e) {
+      console.warn("[WARN][CUSTOM] 마커 로드 실패:", e?.message);
+      setCustomMarkers([]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id, currentUser?.data_file]);
+
+  // ✅ 임의 마커 저장
+  useEffect(() => {
+    if (!currentUser) return;
+    try {
+      localStorage.setItem(CUSTOM_MARKERS_KEY, JSON.stringify(customMarkers));
+    } catch (e) {
+      console.warn("[WARN][CUSTOM] 마커 저장 실패:", e?.message);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customMarkers, currentUser?.id, currentUser?.data_file]);
+
 
   /** 주소 → 좌표 변환 (Python 캐시만 사용, Kakao 지오코딩 호출 X) **/
   const geocodeAddress = async (address) => {
@@ -882,7 +948,6 @@ const getVisibleMeterIds = () => {
             if (ov) {
               ov.setMap(null);
               setActiveOverlay(null);
-              activeOverlay = null;
               console.log("[DEBUG][POPUP] ✕ 버튼 클릭 — 팝업 닫힘");
             }
           });
@@ -1029,6 +1094,161 @@ const getVisibleMeterIds = () => {
     }
   };
 
+    const clearCustomMarkerObjects = () => {
+    customMarkerObjsRef.current.forEach((o) => {
+      try { o.marker?.setMap(null); } catch {}
+      try { o.label?.setMap(null); } catch {}
+    });
+    customMarkerObjsRef.current = [];
+  };
+
+  const renderCustomMarkers = () => {
+    if (!map || !window.kakao?.maps) return;
+
+    clearCustomMarkerObjects();
+
+    customMarkers.forEach((m) => {
+      const coord = new window.kakao.maps.LatLng(m.lat, m.lng);
+
+      const marker = new window.kakao.maps.Marker({
+        position: coord,
+        draggable: false,
+      });
+      marker.setMap(map);
+
+      const labelEl = document.createElement("div");
+      labelEl.style.cssText = `
+        background: rgba(255,255,255,0.95);
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        padding: 4px 6px;
+        font-size: 12px;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+        white-space: nowrap;
+        transform: translateY(-6px);
+        pointer-events: none;
+      `;
+      labelEl.textContent = m.text || "";
+
+      const label = new window.kakao.maps.CustomOverlay({
+        position: coord,
+        content: labelEl,
+        yAnchor: 1.9,
+        zIndex: 999998,
+      });
+      if (m.text) label.setMap(map);
+
+      customMarkerObjsRef.current.push({ id: m.id, marker, label });
+    });
+  };
+
+  // ✅ customMarkers 바뀔 때마다 지도에 반영
+  useEffect(() => {
+    if (!map) return;
+    renderCustomMarkers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map, customMarkers]);
+
+  const closeCustomInputOverlay = () => {
+    if (customInputOverlayRef.current) {
+      try { customInputOverlayRef.current.setMap(null); } catch {}
+      customInputOverlayRef.current = null;
+    }
+  };
+
+  const openCustomTextEditor = (position, onSave) => {
+    closeCustomInputOverlay();
+
+    const box = document.createElement("div");
+    box.style.cssText = `
+      background: white;
+      border: 1px solid #ccc;
+      border-radius: 10px;
+      padding: 8px;
+      width: 220px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+      font-size: 12px;
+    `;
+
+    const title = document.createElement("div");
+    title.textContent = "메모 입력";
+    title.style.cssText = "font-weight:700; margin-bottom:6px;";
+    box.appendChild(title);
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.placeholder = "예: 누수 의심, 재방문 필요...";
+    input.style.cssText = `
+      width: 100%;
+      padding: 7px 8px;
+      border-radius: 8px;
+      border: 1px solid #ddd;
+      outline: none;
+      box-sizing: border-box;
+    `;
+    box.appendChild(input);
+
+    const btnRow = document.createElement("div");
+    btnRow.style.cssText =
+      "display:flex; gap:6px; margin-top:8px; justify-content:flex-end;";
+
+    const cancelBtn = document.createElement("button");
+    cancelBtn.textContent = "취소";
+    cancelBtn.style.cssText = `
+      padding: 6px 10px;
+      border-radius: 8px;
+      border: 1px solid #ddd;
+      background: #fff;
+      cursor: pointer;
+    `;
+    cancelBtn.onclick = (e) => {
+      e.stopPropagation();
+      closeCustomInputOverlay();
+    };
+
+    const saveBtn = document.createElement("button");
+    saveBtn.textContent = "저장";
+    saveBtn.style.cssText = `
+      padding: 6px 10px;
+      border-radius: 8px;
+      border: none;
+      background: #007bff;
+      color: white;
+      cursor: pointer;
+      font-weight: 700;
+    `;
+    saveBtn.onclick = (e) => {
+      e.stopPropagation();
+      const text = (input.value || "").trim();
+      onSave(text);
+      closeCustomInputOverlay();
+    };
+
+    btnRow.appendChild(cancelBtn);
+    btnRow.appendChild(saveBtn);
+    box.appendChild(btnRow);
+
+    const ov = new window.kakao.maps.CustomOverlay({
+      position,
+      content: box,
+      yAnchor: 1.8,
+      zIndex: 999999,
+    });
+    ov.setMap(map);
+    customInputOverlayRef.current = ov;
+
+    setTimeout(() => input.focus(), 0);
+  };
+
+  const cleanupDraftMarker = () => {
+    if (draftMarkerRef.current) {
+      try { draftMarkerRef.current.setMap(null); } catch {}
+      draftMarkerRef.current = null;
+    }
+    closeCustomInputOverlay();
+  };
+
+
   /** ✅ 마커 렌더링 자동 트리거 (지도, 데이터, geoCache 모두 준비된 뒤 실행) **/
   useEffect(() => {
     let checkCount = 0;
@@ -1096,6 +1316,55 @@ const getVisibleMeterIds = () => {
     };
   }, [map]);
 
+    // ➕ 추가 모드: 지도 클릭 → 임시 마커 생성(드래그 가능), 마커 다시 클릭 → 고정 + 텍스트 입력
+  useEffect(() => {
+    if (!map || !window.kakao?.maps) return;
+
+    const onMapClick = (mouseEvent) => {
+      if (!isAddMarkerMode) return;
+
+      // 이미 임시 마커가 있으면(드래그 중이면) 지도 클릭은 무시
+      if (draftMarkerRef.current) return;
+
+      const pos = mouseEvent.latLng;
+
+      const marker = new window.kakao.maps.Marker({
+        position: pos,
+        draggable: true,
+      });
+      marker.setMap(map);
+      draftMarkerRef.current = marker;
+
+      // “마커를 한번 더 누르면” → 고정 + 텍스트 입력
+      window.kakao.maps.event.addListener(marker, "click", () => {
+        const fixedPos = marker.getPosition();
+
+        marker.setDraggable(false);
+
+        openCustomTextEditor(fixedPos, (text) => {
+          const lat = fixedPos.getLat();
+          const lng = fixedPos.getLng();
+
+          const id =
+            (window.crypto?.randomUUID && window.crypto.randomUUID()) ||
+            String(Date.now());
+
+          setCustomMarkers((prev) => [...prev, { id, lat, lng, text }]);
+
+          // 임시 마커 제거(실제 마커는 renderCustomMarkers가 렌더)
+          cleanupDraftMarker();
+        });
+      });
+    };
+
+    window.kakao.maps.event.addListener(map, "click", onMapClick);
+
+    return () => {
+      window.kakao.maps.event.removeListener(map, "click", onMapClick);
+    };
+  }, [map, isAddMarkerMode]);
+
+
   /** 상태 업데이트 (버튼 클릭 시만 DB 업로드) **/
   const updateStatus = async (meterIds, newStatus, coords) => {
     try {
@@ -1145,7 +1414,6 @@ await fetchLatestStatus(payload.map((p) => p.meter_id));
       if (overlay) {
         overlay.setMap(null);
         setActiveOverlay(null);
-        activeOverlay = null;
       }
 
       console.log("[DEBUG][STATUS] 🔁 전체 지도 최신화 완료");
@@ -1218,7 +1486,7 @@ await fetchLatestStatus(payload.map((p) => p.meter_id));
     });
   };
 
-  /** 🔴 내 위치 실시간 추적 (빨간 동그라미, 나만 보임) **/
+  /** 🔴 내 위치 실시간 추적 (진행방향 화살표, 나만 보임) **/
   useEffect(() => {
     if (!map || !currentUser) return;
 
@@ -1240,26 +1508,60 @@ await fetchLatestStatus(payload.map((p) => p.meter_id));
         first = false;
       }
 
-      // 이미 내 위치 오버레이가 있으면 위치만 옮김
+      // ✅ heading(기기 제공) 우선 사용, 없으면 이전 위치로 계산
+      let heading = Number.isFinite(pos.coords.heading) ? pos.coords.heading : null;
+
+      const prev = myLastPosRef.current;
+      if (heading == null && prev) {
+        // 너무 작은 이동은 노이즈가 많아서 방향 유지
+        const moved = distanceInMeters(prev.lat, prev.lng, lat, lng);
+        if (moved > 2) heading = calcBearing(prev.lat, prev.lng, lat, lng);
+      }
+
+      if (heading == null) heading = myLastHeadingRef.current;
+      if (heading != null) myLastHeadingRef.current = heading;
+
+      myLastPosRef.current = { lat, lng };
+
+      // 이미 내 위치 오버레이가 있으면 위치만 옮기고, 방향만 갱신
       if (myLocationOverlayRef.current) {
         myLocationOverlayRef.current.setPosition(locPosition);
+        if (myLocationArrowElRef.current && heading != null) {
+          myLocationArrowElRef.current.style.transform = `rotate(${heading}deg)`;
+        }
         return;
       }
 
-      // 🔴 빨간 원 엘리먼트 생성
-      const markerEl = document.createElement("div");
-      markerEl.style.cssText = `
-        width: 10px;
-        height: 10px;
-        border-radius: 50%;
-        background: red;
-        border: 2px solid white;
-        box-shadow: 0 0 4px rgba(255,0,0,0.8);
+      // 🧭 화살표 엘리먼트 생성 (CSS 삼각형)
+      const wrapper = document.createElement("div");
+      wrapper.style.cssText = `
+        width: 28px;
+        height: 28px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        pointer-events: none;
       `;
+
+      const arrow = document.createElement("div");
+      arrow.style.cssText = `
+        width: 0;
+        height: 0;
+        border-left: 7px solid transparent;
+        border-right: 7px solid transparent;
+        border-bottom: 14px solid red; /* 기본은 북쪽(위) 방향 */
+        filter: drop-shadow(0 0 3px rgba(0,0,0,0.35));
+        transform-origin: 50% 60%;
+      `;
+
+      if (heading != null) arrow.style.transform = `rotate(${heading}deg)`;
+
+      wrapper.appendChild(arrow);
+      myLocationArrowElRef.current = arrow;
 
       const overlay = new window.kakao.maps.CustomOverlay({
         position: locPosition,
-        content: markerEl,
+        content: wrapper,
         yAnchor: 0.5,
         xAnchor: 0.5,
         zIndex: 99999,
@@ -1273,7 +1575,6 @@ await fetchLatestStatus(payload.map((p) => p.meter_id));
       console.warn("[DEBUG][GEO] ⚠️ 위치 추적 실패:", err?.message);
     };
 
-    // ✅ 실시간 추적
     const watchId = navigator.geolocation.watchPosition(success, error, {
       enableHighAccuracy: true,
       maximumAge: 5000,
@@ -1281,7 +1582,6 @@ await fetchLatestStatus(payload.map((p) => p.meter_id));
     });
     myLocationWatchIdRef.current = watchId;
 
-    // 클린업: 지도/유저 변경되거나 컴포넌트 언마운트 시 정리
     return () => {
       if (myLocationWatchIdRef.current != null) {
         navigator.geolocation.clearWatch(myLocationWatchIdRef.current);
@@ -1291,8 +1591,12 @@ await fetchLatestStatus(payload.map((p) => p.meter_id));
         myLocationOverlayRef.current.setMap(null);
         myLocationOverlayRef.current = null;
       }
+      myLocationArrowElRef.current = null;
+      myLastPosRef.current = null;
+      myLastHeadingRef.current = null;
     };
   }, [map, currentUser]);
+
 
   /** 로그인 UI **/
   if (!loggedIn)
@@ -1503,6 +1807,54 @@ await fetchLatestStatus(payload.map((p) => p.meter_id));
     </div>
   </div>
 
+      {/* ➕ 임의 마커 추가 버튼 (오른쪽 상단) */}
+      <button
+        onClick={() => {
+          setIsAddMarkerMode((v) => {
+            const next = !v;
+            if (!next) cleanupDraftMarker(); // 끌 때 임시 마커/입력창 정리
+            return next;
+          });
+        }}
+        style={{
+          position: "fixed",
+          top: 14,
+          right: 14,
+          zIndex: 999999,
+          padding: "10px 14px",
+          borderRadius: "10px",
+          border: "none",
+          background: isAddMarkerMode ? "#dc3545" : "#28a745",
+          color: "white",
+          cursor: "pointer",
+          fontWeight: 800,
+          boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
+        }}
+      >
+        {isAddMarkerMode ? "✕ 추가 취소" : "➕ 추가"}
+      </button>
+
+      {isAddMarkerMode && (
+        <div
+          style={{
+            position: "fixed",
+            top: 58,
+            right: 14,
+            zIndex: 999999,
+            background: "rgba(255,255,255,0.95)",
+            border: "1px solid #ddd",
+            borderRadius: "10px",
+            padding: "8px 10px",
+            fontSize: "12px",
+            boxShadow: "0 2px 8px rgba(0,0,0,0.18)",
+            lineHeight: 1.35,
+          }}
+        >
+          1) 지도 클릭 → 임시 마커 생성<br />
+          2) 드래그로 위치 조정<br />
+          3) 마커 다시 클릭 → 텍스트 입력/저장
+        </div>
+      )}
 
       <button
         onClick={toggleMapType}
