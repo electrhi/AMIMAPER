@@ -1615,6 +1615,27 @@ const openCustomMarkerEditor = (markerObj) => {
 
 if (upsertError) throw upsertError;
 
+      // ✅ 2) user_last_locations는 "유저 마지막 위치" (유저당 1행 유지)
+const lastAddress = payload[0]?.address || "";
+const { error: lastLocError } = await supabase
+  .from("user_last_locations")
+  .upsert(
+    {
+      data_file: currentUser.data_file,
+      user_id: currentUser.id,
+      address: lastAddress,
+      lat: parseFloat(coords.lat),
+      lng: parseFloat(coords.lng),
+      status: newStatus,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "data_file,user_id" }
+  )
+  .select("user_id"); // ✅ 응답 최소화
+
+if (lastLocError) throw lastLocError;
+
+
 console.log("[DEBUG][STATUS] ✅ DB 업데이트 완료:", payload);
 
 // ✅ 최신 상태는 "방금 업데이트한 계기들만" 반영
@@ -1642,6 +1663,7 @@ await fetchLatestStatus(payload.map((p) => p.meter_id));
 
   /** ✅ 다른 사용자 마지막 위치 불러오기 (user_last_locations 사용) **/
 const loadOtherUserLocations = async () => {
+  if (!isAdmin) return;            // ✅ 추가
   if (!map || !currentUser?.data_file) return;
 
   // 기존 오버레이 제거
