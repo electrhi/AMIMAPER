@@ -1356,7 +1356,7 @@ const openCustomMarkerEditor = (markerObj) => {
   const ov = new window.kakao.maps.CustomOverlay({
     position: pos,
     content: box,
-    yAnchor: 1.8,
+    yAnchor: 1.35,
     zIndex: 999999,
   });
   ov.setMap(map);
@@ -1965,7 +1965,7 @@ await fetchLatestStatus(payload.map((p) => p.meter_id));
     fontSize: isMobile ? "13px" : "12px",
 
     // ✅ 모바일에서 덜 작게
-    transform: `scale(${isMobile ? 0.95 : 0.78})`,
+    transform: `scale(${isMobile ? 0.665 : 0.546})`, // 0.95*0.7=0.665, 0.78*0.7=0.546
     transformOrigin: "top left",
   }}
 >
