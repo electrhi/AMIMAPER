@@ -1094,9 +1094,7 @@ useEffect(() => {
 
     // ✅ 관리자: 마커 팝업 안에서 어떤 버튼이든 누르면
     //    일반 유저 마지막 작업 위치(보라색) 전부 표시
-    if (isAdmin) {
       await loadOtherUserLocations();
-    }
 
     if (text === "가기") {
       const url = `https://map.kakao.com/link/to/${encodeURIComponent(
