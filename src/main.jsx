@@ -77,8 +77,9 @@ const customEditDraftRef = useRef(null);
 
 
   // ✅ 관리자 여부
-  const isAdmin =
-    currentUser?.can_view_others === true || currentUser?.can_view_others === "y";
+ const isAdmin =
+  currentUser?.can_view_others === true ||
+  String(currentUser?.can_view_others || "").toLowerCase() === "y";
 
 
     // 🔴 내 위치(방향 화살표) 엘리먼트 ref
@@ -379,7 +380,6 @@ rows.forEach((d) => {
           }
         );
         setMap(mapInstance);
-        setTimeout(() => loadOtherUserLocations(), 800);
       });
     };
     document.head.appendChild(script);
@@ -1661,29 +1661,39 @@ await fetchLatestStatus(payload.map((p) => p.meter_id));
     }
   };
 
-  /** ✅ 다른 사용자 마지막 위치 불러오기 (user_last_locations 사용) **/
+/** ✅ 다른 사용자 마지막 위치 불러오기
+ *  - 관리자(isAdmin): data_file 무시하고 전체 유저의 "마지막 위치"만 표시
+ *  - (user_last_locations에 data_file별로 행이 여러개 있을 수 있으니 user_id별 최신 1개로 압축)
+ */
 const loadOtherUserLocations = async () => {
-  if (!isAdmin) return;            // ✅ 추가
-  if (!map || !currentUser?.data_file) return;
+  if (!map) return;
+  if (!isAdmin) return;
 
-  // 기존 오버레이 제거
   otherUserOverlays.current.forEach((ov) => ov.setMap(null));
   otherUserOverlays.current = [];
 
   const { data: rows, error } = await supabase
     .from("user_last_locations")
-    .select("user_id,address,lat,lng,status,updated_at")
-    .eq("data_file", currentUser.data_file)
-    .order("updated_at", { ascending: false });
+    .select("user_id,data_file,address,lat,lng,status,updated_at")
+    .not("user_id", "is", null)
+    .order("updated_at", { ascending: false })
+    .limit(5000);
 
   if (error) {
     console.error("[ERROR][OTHERS] user_last_locations:", error.message);
     return;
   }
 
-  (rows || []).forEach((loc) => {
-    if (!loc?.user_id || loc.lat == null || loc.lng == null) return;
+  console.log("[DEBUG][OTHERS] fetched rows:", rows?.length || 0);
 
+  const latestByUser = new Map();
+  for (const loc of rows || []) {
+    if (!loc?.user_id) continue;
+    if (loc.lat == null || loc.lng == null) continue;
+    if (!latestByUser.has(loc.user_id)) latestByUser.set(loc.user_id, loc);
+  }
+
+  for (const loc of latestByUser.values()) {
     const coord = new window.kakao.maps.LatLng(loc.lat, loc.lng);
 
     const markerEl = document.createElement("div");
@@ -1698,15 +1708,14 @@ const loadOtherUserLocations = async () => {
       text-shadow:0 0 3px black;
       cursor:pointer;
     `;
-    markerEl.textContent = loc.user_id;
 
-    // 클릭하면 길찾기
+    markerEl.textContent = loc.user_id; // ✅ 빠져있던 핵심
+    markerEl.title = loc.data_file ? `파일: ${loc.data_file}` : "";
+
     markerEl.addEventListener("click", (e) => {
       e.stopPropagation();
       const label = loc.address || loc.user_id;
-      const url = `https://map.kakao.com/link/to/${encodeURIComponent(
-        label
-      )},${loc.lat},${loc.lng}`;
+      const url = `https://map.kakao.com/link/to/${encodeURIComponent(label)},${loc.lat},${loc.lng}`;
       window.open(url, "_blank");
     });
 
@@ -1718,8 +1727,18 @@ const loadOtherUserLocations = async () => {
 
     overlay.setMap(map);
     otherUserOverlays.current.push(overlay);
-  });
+  }
 };
+
+
+  // ✅ 관리자면 지도 준비된 뒤 다른 유저 위치 1회 로드
+useEffect(() => {
+  if (!map) return;
+  if (!isAdmin) return;
+  loadOtherUserLocations();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [map, isAdmin]);
+
 
   /** 🔴 내 위치 실시간 추적 (진행방향 화살표, 나만 보임) **/
   useEffect(() => {
