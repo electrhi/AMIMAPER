@@ -379,6 +379,7 @@ rows.forEach((d) => {
           }
         );
         setMap(mapInstance);
+        setTimeout(() => loadOtherUserLocations(), 800);
       });
     };
     document.head.appendChild(script);
@@ -1639,69 +1640,64 @@ await fetchLatestStatus(payload.map((p) => p.meter_id));
     }
   };
 
-  /** 관리자 모드: 다른 사용자 위치 불러오기 **/
-  const loadOtherUserLocations = async () => {
-    if (!map) return;
+  /** ✅ 다른 사용자 마지막 위치 불러오기 (user_last_locations 사용) **/
+const loadOtherUserLocations = async () => {
+  if (!map || !currentUser?.data_file) return;
 
-    // 기존 관리자 오버레이 제거
-    otherUserOverlays.current.forEach((ov) => ov.setMap(null));
-    otherUserOverlays.current = [];
+  // 기존 오버레이 제거
+  otherUserOverlays.current.forEach((ov) => ov.setMap(null));
+  otherUserOverlays.current = [];
 
-    const { data: logs, error } = await supabase
-      .from("meters")
-      .select("address, lat, lng, status, user_id, updated_at")
-      .eq("data_file", currentUser.data_file)   // ✅ 추가
-      .not("user_id", "is", null)
-      .order("updated_at", { ascending: false });
+  const { data: rows, error } = await supabase
+    .from("user_last_locations")
+    .select("user_id,address,lat,lng,status,updated_at")
+    .eq("data_file", currentUser.data_file)
+    .order("updated_at", { ascending: false });
 
-    if (error) throw error;
+  if (error) {
+    console.error("[ERROR][OTHERS] user_last_locations:", error.message);
+    return;
+  }
 
-    const latest = {};
-    logs.forEach((l) => {
-      if (!l.user_id || !l.lat || !l.lng) return;
-      if (!latest[l.user_id]) latest[l.user_id] = l;
+  (rows || []).forEach((loc) => {
+    if (!loc?.user_id || loc.lat == null || loc.lng == null) return;
+
+    const coord = new window.kakao.maps.LatLng(loc.lat, loc.lng);
+
+    const markerEl = document.createElement("div");
+    markerEl.style.cssText = `
+      background:purple;
+      border-radius:8px;
+      padding:4px 7px;
+      color:white;
+      font-weight:bold;
+      font-size:11px;
+      box-shadow:0 0 6px rgba(0,0,0,0.4);
+      text-shadow:0 0 3px black;
+      cursor:pointer;
+    `;
+    markerEl.textContent = loc.user_id;
+
+    // 클릭하면 길찾기
+    markerEl.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const label = loc.address || loc.user_id;
+      const url = `https://map.kakao.com/link/to/${encodeURIComponent(
+        label
+      )},${loc.lat},${loc.lng}`;
+      window.open(url, "_blank");
     });
 
-    Object.keys(latest).forEach((uid) => {
-      const loc = latest[uid];
-      const coord = new window.kakao.maps.LatLng(loc.lat, loc.lng);
-
-      const markerEl = document.createElement("div");
-      markerEl.style.cssText = `
-        background:purple;
-        border-radius:8px;
-        padding:4px 7px;
-        color:white;
-        font-weight:bold;
-        font-size:11px;
-        box-shadow:0 0 6px rgba(0,0,0,0.4);
-        text-shadow:0 0 3px black;
-        cursor:pointer;          /* 👉 클릭 가능 느낌 */
-      `;
-      markerEl.textContent = uid;
-
-      // 👉 이름(보라색 박스) 클릭하면 해당 위치로 카카오 길찾기
-      markerEl.addEventListener("click", (e) => {
-        e.stopPropagation();
-
-        const label = loc.address || uid; // 주소가 있으면 주소, 없으면 유저ID
-
-        const url = `https://map.kakao.com/link/to/${encodeURIComponent(
-          label
-        )},${loc.lat},${loc.lng}`;
-
-        window.open(url, "_blank");
-      });
-
-      const overlay = new window.kakao.maps.CustomOverlay({
-        position: coord,
-        content: markerEl,
-        yAnchor: 2.5,
-      });
-      overlay.setMap(map);
-      otherUserOverlays.current.push(overlay);
+    const overlay = new window.kakao.maps.CustomOverlay({
+      position: coord,
+      content: markerEl,
+      yAnchor: 2.5,
     });
-  };
+
+    overlay.setMap(map);
+    otherUserOverlays.current.push(overlay);
+  });
+};
 
   /** 🔴 내 위치 실시간 추적 (진행방향 화살표, 나만 보임) **/
   useEffect(() => {
