@@ -56,6 +56,31 @@ function App() {
   // ✅ 마커 개수 필터 (입력 숫자 이상만 표시, 비어 있으면 전체)
   const [minMarkerCount, setMinMarkerCount] = useState("");
 
+  // ✅ 상태 필터(좌상단 탭): null이면 전체
+const [statusFilter, setStatusFilter] = useState(null); // "완료" | "불가" | "미방문" | null
+
+// ✅ 주소 라벨 ON/OFF
+const [showAddressLabels, setShowAddressLabels] = useState(true);
+
+// ✅ 모바일 여부(터치 영역/패널 스케일 조절)
+const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 520);
+useEffect(() => {
+  const onResize = () => setIsMobile(window.innerWidth <= 520);
+  window.addEventListener("resize", onResize);
+  return () => window.removeEventListener("resize", onResize);
+}, []);
+
+// ✅ 임의 마커 수정/삭제용 오버레이
+const customEditOverlayRef = useRef(null);
+const editingCustomIdRef = useRef(null);
+const customEditDraftRef = useRef(null);
+
+
+  // ✅ 관리자 여부
+  const isAdmin =
+    currentUser?.can_view_others === true || currentUser?.can_view_others === "y";
+
+
     // 🔴 내 위치(방향 화살표) 엘리먼트 ref
   const myLocationArrowElRef = useRef(null);
 
@@ -599,6 +624,13 @@ const getVisibleMeterIds = () => {
   return Array.from(new Set(ids.map(normalizeMeterId))).filter(Boolean);
 };
 
+  // ✅ 상태 필터/주소라벨 토글 바뀌면 지도 다시 반영
+useEffect(() => {
+  if (!map) return;
+  renderMarkers();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [statusFilter, showAddressLabels]);
+
 
 
   // ✅ 거리 계산 함수 (미터 단위)
@@ -781,6 +813,8 @@ const getVisibleMeterIds = () => {
         if (!latestPerMeter[d.meter_id]) latestPerMeter[d.meter_id] = d;
       });
       const filteredData = Object.values(latestPerMeter);
+      const filteredForMap = statusFilter ? filteredData.filter((r) => r.status === statusFilter) : filteredData;
+
 
       // 상태 카운트 최소 변경
       setCounts((prev) => {
@@ -792,12 +826,12 @@ const getVisibleMeterIds = () => {
       });
 
       console.log(
-        `[DEBUG][MAP] ✅ 데이터 정제 완료 — ${filteredData.length}건 처리 중...`
+        `[DEBUG][MAP] ✅ 데이터 정제 완료 — ${filteredForMap.length}건 처리 중...`
       );
 
       // 좌표 기준 그룹핑
       const uniqueGroupSet = new Set();
-      for (const row of filteredData) {
+      for (const row of filteredForMap) {
         const { address, lat, lng } = row;
         if (!lat || !lng || !address) continue;
 
@@ -878,7 +912,7 @@ const getVisibleMeterIds = () => {
 
         // 🔹 현재 지도 레벨 기준으로 라벨 표시 여부 결정
         const currentLevel = map.getLevel();
-        const showLabel = currentLevel <= LABEL_SHOW_LEVEL;
+        const showLabel = showAddressLabels && currentLevel <= LABEL_SHOW_LEVEL;
 
         // 🔹 주소 라벨용 엘리먼트
         const labelEl = document.createElement("div");
@@ -1051,28 +1085,31 @@ const getVisibleMeterIds = () => {
 
           popupEl.appendChild(document.createElement("hr"));
 
-          ["완료", "불가", "미방문", "가기"].forEach((text) => {
-            const btn = document.createElement("button");
-            btn.textContent = text;
-            btn.style.margin = "4px";
-            btn.addEventListener("click", async (e) => {
-              e.stopPropagation();
-              if (text === "가기") {
-                const url = `https://map.kakao.com/link/to/${encodeURIComponent(
-                  list[0].address
-                )},${coords.lat},${coords.lng}`;
-                window.open(url, "_blank");
-              } else {
-                // ✅ 여기서만 DB에 상태 업로드 (완료/불가/미방문)
-                await updateStatus(
-                  list.map((g) => g.meter_id),
-                  text,
-                  coords
-                );
-              }
-            });
-            popupEl.appendChild(btn);
-          });
+         ["완료", "불가", "미방문", "가기"].forEach((text) => {
+  const btn = document.createElement("button");
+  btn.textContent = text;
+  btn.style.margin = "4px";
+  btn.addEventListener("click", async (e) => {
+    e.stopPropagation();
+
+    // ✅ 관리자: 마커 팝업 안에서 어떤 버튼이든 누르면
+    //    일반 유저 마지막 작업 위치(보라색) 전부 표시
+    if (isAdmin) {
+      await loadOtherUserLocations();
+    }
+
+    if (text === "가기") {
+      const url = `https://map.kakao.com/link/to/${encodeURIComponent(
+        list[0].address
+      )},${coords.lat},${coords.lng}`;
+      window.open(url, "_blank");
+    } else {
+      await updateStatus(list.map((g) => g.meter_id), text, coords);
+    }
+  });
+  popupEl.appendChild(btn);
+});
+
 
           const popupOverlay = new window.kakao.maps.CustomOverlay({
             position: kakaoCoord,
@@ -1084,8 +1121,7 @@ const getVisibleMeterIds = () => {
           setActiveOverlay(popupOverlay);
         };
 
-        markerEl.addEventListener("click", openPopup);
-        markerEl.addEventListener("touchstart", openPopup);
+        markerEl.addEventListener("pointerdown", openPopup);
       });
 
       console.log(`[DEBUG][MAP] ✅ 마커 ${markerCount}개 렌더링 완료`);
@@ -1137,6 +1173,32 @@ const getVisibleMeterIds = () => {
         zIndex: 999998,
       });
       if (m.text) label.setMap(map);
+      // ✅ label 생성 후 다시 click 편집 등록(이제 label 포함)
+      window.kakao.maps.event.addListener(marker, "click", () => {
+        openCustomMarkerEditor({ id: m.id, marker, label });
+      });
+
+      // ✅ 편집 중인 임의 마커를 드래그로 옮겼을 때 좌표 임시 저장 + 편집창/라벨 위치 갱신
+      window.kakao.maps.event.addListener(marker, "dragend", () => {
+        if (editingCustomIdRef.current !== m.id) return;
+
+        const p = marker.getPosition();
+        const lat = p.getLat();
+        const lng = p.getLng();
+
+        const draft = customEditDraftRef.current || {};
+        customEditDraftRef.current = { ...draft, lat, lng };
+
+        // 편집 오버레이 따라가기
+        if (customEditOverlayRef.current) {
+          try { customEditOverlayRef.current.setPosition(p); } catch {}
+        }
+
+        // 라벨도 따라가기(보이는 경우)
+        if (label) {
+          try { label.setPosition(p); } catch {}
+        }
+      });
 
       customMarkerObjsRef.current.push({ id: m.id, marker, label });
     });
@@ -1155,6 +1217,156 @@ const getVisibleMeterIds = () => {
       customInputOverlayRef.current = null;
     }
   };
+
+  const closeCustomEditOverlay = () => {
+  if (customEditOverlayRef.current) {
+    try { customEditOverlayRef.current.setMap(null); } catch {}
+    customEditOverlayRef.current = null;
+  }
+  editingCustomIdRef.current = null;
+  customEditDraftRef.current = null;
+};
+
+const openCustomMarkerEditor = (markerObj) => {
+  if (!map || !window.kakao?.maps) return;
+
+  closeCustomEditOverlay();
+
+  const { id, marker, label } = markerObj || {};
+  const current = customMarkers.find((m) => m.id === id);
+  if (!current || !marker) return;
+
+  editingCustomIdRef.current = id;
+  customEditDraftRef.current = { ...current }; // lat/lng/text 임시 저장
+
+  const pos = marker.getPosition();
+
+  const box = document.createElement("div");
+  box.style.cssText = `
+    background: white;
+    border: 1px solid #ccc;
+    border-radius: 12px;
+    padding: 10px;
+    width: ${isMobile ? "260px" : "230px"};
+    box-shadow: 0 2px 12px rgba(0,0,0,0.22);
+    font-size: ${isMobile ? "13px" : "12px"};
+  `;
+
+  const title = document.createElement("div");
+  title.textContent = "임의 마커 편집";
+  title.style.cssText = "font-weight:800; margin-bottom:8px;";
+  box.appendChild(title);
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.value = current.text || "";
+  input.placeholder = "텍스트(비우면 라벨 숨김)";
+  input.style.cssText = `
+    width: 100%;
+    padding: 10px 10px;
+    border-radius: 10px;
+    border: 1px solid #ddd;
+    outline: none;
+    box-sizing: border-box;
+    font-size: ${isMobile ? "14px" : "13px"};
+  `;
+  box.appendChild(input);
+
+  const hint = document.createElement("div");
+  hint.style.cssText = "margin-top:6px; color:#666; line-height:1.3;";
+  hint.textContent = "‘위치 이동’ 누른 뒤 드래그 → ‘저장’";
+  box.appendChild(hint);
+
+  const row = document.createElement("div");
+  row.style.cssText = "display:flex; gap:8px; margin-top:10px;";
+
+  const btnStyle = `
+    flex:1;
+    padding: ${isMobile ? "12px 10px" : "10px 10px"};
+    border-radius: 10px;
+    border: none;
+    font-weight: 800;
+    cursor: pointer;
+  `;
+
+  let moving = false;
+
+  const moveBtn = document.createElement("button");
+  moveBtn.textContent = "위치 이동";
+  moveBtn.style.cssText = btnStyle + "background:#222; color:#fff;";
+  moveBtn.onclick = (e) => {
+    e.stopPropagation();
+    moving = !moving;
+    try { marker.setDraggable(moving); } catch {}
+    moveBtn.textContent = moving ? "이동 중..." : "위치 이동";
+    moveBtn.style.opacity = moving ? "0.8" : "1";
+  };
+
+  const saveBtn = document.createElement("button");
+  saveBtn.textContent = "저장";
+  saveBtn.style.cssText = btnStyle + "background:#007bff; color:white;";
+  saveBtn.onclick = (e) => {
+    e.stopPropagation();
+
+    const draft = customEditDraftRef.current || current;
+    const nextText = (input.value || "").trim();
+
+    // 저장(텍스트/위치)
+    setCustomMarkers((prev) =>
+      prev.map((m) =>
+        m.id === id
+          ? { ...m, text: nextText, lat: draft.lat, lng: draft.lng }
+          : m
+      )
+    );
+
+    // 드래그 종료
+    try { marker.setDraggable(false); } catch {}
+
+    closeCustomEditOverlay();
+  };
+
+  row.appendChild(moveBtn);
+  row.appendChild(saveBtn);
+  box.appendChild(row);
+
+  const row2 = document.createElement("div");
+  row2.style.cssText = "display:flex; gap:8px; margin-top:8px;";
+
+  const delBtn = document.createElement("button");
+  delBtn.textContent = "삭제";
+  delBtn.style.cssText = btnStyle + "background:#dc3545; color:white;";
+  delBtn.onclick = (e) => {
+    e.stopPropagation();
+    closeCustomEditOverlay();
+    setCustomMarkers((prev) => prev.filter((m) => m.id !== id));
+  };
+
+  const closeBtn = document.createElement("button");
+  closeBtn.textContent = "닫기";
+  closeBtn.style.cssText = btnStyle + "background:#f1f3f5; color:#222; border:1px solid #ddd;";
+  closeBtn.onclick = (e) => {
+    e.stopPropagation();
+    try { marker.setDraggable(false); } catch {}
+    closeCustomEditOverlay();
+  };
+
+  row2.appendChild(delBtn);
+  row2.appendChild(closeBtn);
+  box.appendChild(row2);
+
+  const ov = new window.kakao.maps.CustomOverlay({
+    position: pos,
+    content: box,
+    yAnchor: 1.8,
+    zIndex: 999999,
+  });
+  ov.setMap(map);
+  customEditOverlayRef.current = ov;
+
+  setTimeout(() => input.focus(), 0);
+};
+
 
   const openCustomTextEditor = (position, onSave) => {
     closeCustomInputOverlay();
@@ -1301,7 +1513,7 @@ const getVisibleMeterIds = () => {
 
     const handler = () => {
       const level = map.getLevel();
-      const show = level <= LABEL_SHOW_LEVEL;
+      const show = showAddressLabels && level <= LABEL_SHOW_LEVEL;
 
       addressOverlaysRef.current.forEach((ov) => {
         ov.setMap(show ? map : null);
@@ -1314,7 +1526,7 @@ const getVisibleMeterIds = () => {
     return () => {
       window.kakao.maps.event.removeListener(map, "zoom_changed", handler);
     };
-  }, [map]);
+  }, [map, showAddressLabels]);
 
     // ➕ 추가 모드: 지도 클릭 → 임시 마커 생성(드래그 가능), 마커 다시 클릭 → 고정 + 텍스트 입력
   useEffect(() => {
@@ -1333,7 +1545,9 @@ const getVisibleMeterIds = () => {
         draggable: true,
       });
       marker.setMap(map);
+      
       draftMarkerRef.current = marker;
+      
 
       // “마커를 한번 더 누르면” → 고정 + 텍스트 입력
       window.kakao.maps.event.addListener(marker, "click", () => {
@@ -1407,8 +1621,11 @@ await fetchLatestStatus(payload.map((p) => p.meter_id));
 
       // 전체 재렌더 대신 근처 마커 색만 빠르게 업데이트
       renderMarkersPartial(coords, newStatus);
+      // ✅ 상태 필터가 켜져 있으면(완료/불가/미방문만 보기) 지도 표시가 달라질 수 있으니 재렌더
+      if (statusFilter) {
+        setTimeout(() => renderMarkers(), 0);
+      }
 
-      if (currentUser.can_view_others) await loadOtherUserLocations();
 
       const overlay = getActiveOverlay();
       if (overlay) {
@@ -1736,76 +1953,108 @@ await fetchLatestStatus(payload.map((p) => p.meter_id));
   return (
     <div style={{ width: "100%", height: "100vh", position: "relative" }}>
         {/* 왼쪽 상단 상태 카운트 + 마커 개수 필터 */}
-  <div
-    style={{
-      position: "fixed",
-      top: 10,
-      left: 10,
-      background: "white",
-      padding: "8px 12px",
-      borderRadius: "8px",
-      boxShadow: "0 2px 5px rgba(0,0,0,0.2)",
-      zIndex: 999999,
-      fontSize: "12px",
 
-      // 🔽 여기 두 줄 추가 (전체 박스를 70% 크기로)
-    transform: "scale(0.7)",
+      <div
+  style={{
+    position: "fixed",
+    top: 10,
+    left: 10,
+    background: "white",
+    padding: isMobile ? "10px 12px" : "8px 12px",
+    borderRadius: "10px",
+    boxShadow: "0 2px 8px rgba(0,0,0,0.18)",
+    zIndex: 999999,
+    fontSize: isMobile ? "13px" : "12px",
+
+    // ✅ 모바일에서 덜 작게
+    transform: `scale(${isMobile ? 0.95 : 0.78})`,
     transformOrigin: "top left",
-    }}
-  >
-    {/* 상태 카운트 */}
-    <div style={{ fontWeight: "bold", marginBottom: 6 }}>
-      ✅ 완료: {counts["완료"] || 0} | ❌ 불가: {counts["불가"] || 0} | 🟦 미방문:{" "}
-      {counts["미방문"] || 0}
-    </div>
-
-    {/* 마커 개수 필터 */}
-    <div
-      style={{
-        marginTop: 4,
-        paddingTop: 4,
-        borderTop: "1px solid #eee",
-      }}
-    >
-      <div style={{ marginBottom: 4, fontWeight: "bold" }}>마커 개수 필터</div>
-      <div style={{ display: "flex", alignItems: "center" }}>
-        <input
-          type="number"
-          min="1"
-          value={minMarkerCount}
-          onChange={(e) => setMinMarkerCount(e.target.value)}
-          placeholder="예: 3"
-          style={{
-            width: "70px",
-            padding: "3px 6px",
-            fontSize: "12px",
-            borderRadius: "4px",
-            border: "1px solid #ccc",
-            boxSizing: "border-box",
-          }}
-        />
+  }}
+>
+  {/* ✅ 상태 탭(터치 필터) */}
+  <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+    {["완료", "불가", "미방문"].map((s) => {
+      const active = statusFilter === s;
+      return (
         <button
-          onClick={handleApplyFilter}
+          key={s}
+          onClick={() => setStatusFilter((prev) => (prev === s ? null : s))}
           style={{
-            marginLeft: 6,
-            padding: "4px 8px",
-            fontSize: "12px",
-            borderRadius: "4px",
             border: "none",
-            background: "#007bff",
-            color: "white",
+            background: "transparent",
+            padding: isMobile ? "10px 10px" : "7px 8px", // ✅ 터치영역 크게
+            fontWeight: 900,
+            fontSize: isMobile ? "14px" : "12px",
             cursor: "pointer",
-            whiteSpace: "nowrap",
+            textDecoration: active ? "underline" : "none",
+            textUnderlineOffset: "6px",
           }}
         >
-          필터
+          {s} {counts[s] || 0}
         </button>
-      </div>
-      <div style={{ marginTop: 2, fontSize: "11px", color: "#555" }}>
-        비우면 전체 표시
-      </div>
+      );
+    })}
+
+    {/* ✅ 주소 라벨 토글 */}
+    <button
+      onClick={() => setShowAddressLabels((v) => !v)}
+      style={{
+        marginLeft: "auto",
+        padding: isMobile ? "10px 10px" : "7px 8px",
+        borderRadius: "10px",
+        border: "1px solid #ddd",
+        background: showAddressLabels ? "#f1f3f5" : "#fff",
+        fontWeight: 900,
+        cursor: "pointer",
+        fontSize: isMobile ? "13px" : "12px",
+      }}
+    >
+      주소 {showAddressLabels ? "ON" : "OFF"}
+    </button>
+  </div>
+
+  {/* 마커 개수 필터 */}
+  <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #eee" }}>
+    <div style={{ marginBottom: 6, fontWeight: 900 }}>마커 개수 필터</div>
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <input
+        type="number"
+        min="1"
+        value={minMarkerCount}
+        onChange={(e) => setMinMarkerCount(e.target.value)}
+        placeholder="예: 3"
+        style={{
+          width: isMobile ? "90px" : "70px",
+          padding: isMobile ? "10px 10px" : "6px 8px",
+          fontSize: isMobile ? "14px" : "12px",
+          borderRadius: "10px",
+          border: "1px solid #ccc",
+          boxSizing: "border-box",
+        }}
+      />
+      <button
+        onClick={handleApplyFilter}
+        style={{
+          padding: isMobile ? "10px 14px" : "7px 10px",
+          fontSize: isMobile ? "14px" : "12px",
+          borderRadius: "10px",
+          border: "none",
+          background: "#007bff",
+          color: "white",
+          cursor: "pointer",
+          fontWeight: 900,
+          whiteSpace: "nowrap",
+        }}
+      >
+        적용
+      </button>
+    </div>
+    <div style={{ marginTop: 4, fontSize: isMobile ? "12px" : "11px", color: "#555" }}>
+      비우면 전체 표시 / 상태 탭은 한번 더 누르면 전체
     </div>
   </div>
+</div>
+
 
       {/* ➕ 임의 마커 추가 버튼 (오른쪽 상단) */}
       <button
