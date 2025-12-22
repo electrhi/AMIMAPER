@@ -1089,24 +1089,26 @@ useEffect(() => {
   const btn = document.createElement("button");
   btn.textContent = text;
   btn.style.margin = "4px";
+
   btn.addEventListener("click", async (e) => {
     e.stopPropagation();
-
-    // ✅ 관리자: 마커 팝업 안에서 어떤 버튼이든 누르면
-    //    일반 유저 마지막 작업 위치(보라색) 전부 표시
-      await loadOtherUserLocations();
 
     if (text === "가기") {
       const url = `https://map.kakao.com/link/to/${encodeURIComponent(
         list[0].address
       )},${coords.lat},${coords.lng}`;
       window.open(url, "_blank");
-    } else {
-      await updateStatus(list.map((g) => g.meter_id), text, coords);
+      return;
     }
+
+    await updateStatus(list.map((g) => g.meter_id), text, coords);
+    await loadOtherUserLocations();
   });
-  popupEl.appendChild(btn);
+
+  popupEl.appendChild(btn); // ✅ 이거 빠지면 버튼이 안 뜸
 });
+
+
 
 
           const popupOverlay = new window.kakao.maps.CustomOverlay({
