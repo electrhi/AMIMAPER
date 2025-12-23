@@ -648,41 +648,43 @@ useEffect(() => {
     return R * c; // 미터 단위로 반환
   };
 
-  // ✅ 클릭한 지점 반경 1km 이내 마커들만 색상 업데이트 (빠른 버전)
   const renderMarkersPartial = (coords, newStatus) => {
-    const RADIUS = 1000; // 1km
-    const lat = parseFloat(coords.lat);
-    const lng = parseFloat(coords.lng);
-    let updatedCount = 0;
+  const RADIUS = 1000; // 1km
+  const lat = Number(coords.lat);
+  const lng = Number(coords.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
 
-    markersRef.current.forEach((overlay) => {
-      const pos = overlay.getPosition?.();
-      if (!pos) return;
+  let updatedCount = 0;
 
-      const mLat = pos.getLat();
-      const mLng = pos.getLng();
-      const d = distanceInMeters(lat, lng, mLat, mLng);
+  markersRef.current.forEach((overlay) => {
+    const mLat = Number(overlay.__lat);
+    const mLng = Number(overlay.__lng);
 
-      if (d <= RADIUS) {
-        const el = overlay.getContent();
-        if (!el) return;
+    if (!Number.isFinite(mLat) || !Number.isFinite(mLng)) return;
 
-        const color =
-          newStatus === "완료"
-            ? "green"
-            : newStatus === "불가"
-            ? "red"
-            : "blue";
+    const d = distanceInMeters(lat, lng, mLat, mLng);
 
-        el.style.background = color;
-        el.style.transition = "background 0.3s ease";
+    if (d <= RADIUS) {
+      const el = overlay.getContent();
+      if (!el) return;
 
-        updatedCount++;
-      }
-    });
+      const color =
+        newStatus === "완료"
+          ? "green"
+          : newStatus === "불가"
+          ? "red"
+          : "blue";
 
-    console.log(`[DEBUG][MAP] 🟢 반경 1km 내 ${updatedCount}개 마커 색상만 변경`);
-  };
+      el.style.background = color;
+      el.style.transition = "background 0.3s ease";
+
+      updatedCount++;
+    }
+  });
+
+  console.log(`[DEBUG][MAP] 🟢 반경 1km 내 ${updatedCount}개 마커 색상만 변경`);
+};
+
 
   /** ✅ geoCache 매칭 (엑셀 address ↔ JSON 좌표) **/
   useEffect(() => {
@@ -902,13 +904,19 @@ useEffect(() => {
         `;
         markerEl.textContent = list.length;
 
-        const overlay = new window.kakao.maps.CustomOverlay({
-          position: kakaoCoord,
-          content: markerEl,
-          yAnchor: 1,
-        });
+      const overlay = new window.kakao.maps.CustomOverlay({
+        position: kakaoCoord,
+        content: markerEl,
+        yAnchor: 1,
+      });
+
+        // ✅ Partial 업데이트용 좌표 박아두기 (무조건 숫자로 고정)
+        overlay.__lat = Number(coords.lat);
+        overlay.__lng = Number(coords.lng);
+
         overlay.setMap(map);
         markersRef.current.push(overlay);
+
         markerCount++;
 
         // 🔹 현재 지도 레벨 기준으로 라벨 표시 여부 결정
@@ -1635,27 +1643,35 @@ const { error: lastLocError } = await supabase
 
 if (lastLocError) throw lastLocError;
 
-
 console.log("[DEBUG][STATUS] ✅ DB 업데이트 완료:", payload);
 
-// ✅ 최신 상태는 "방금 업데이트한 계기들만" 반영
+// ✅ 화면 즉시 반영(낙관적 업데이트)
+const idSet = new Set(meterIds.map(normalizeMeterId));
+setData((prev) =>
+  prev.map((r) =>
+    idSet.has(normalizeMeterId(r.meter_id))
+      ? { ...r, status: newStatus }
+      : r
+  )
+);
+
+// ✅ 최신 상태는 "방금 업데이트한 계기들만" 반영 (1번만)
 await fetchLatestStatus(payload.map((p) => p.meter_id));
 
-      // 전체 재렌더 대신 근처 마커 색만 빠르게 업데이트
-      renderMarkersPartial(coords, newStatus);
-      // ✅ 상태 필터가 켜져 있으면(완료/불가/미방문만 보기) 지도 표시가 달라질 수 있으니 재렌더
-      if (statusFilter) {
-        setTimeout(() => renderMarkers(), 0);
-      }
+// ✅ 전체 재렌더 대신 근처 마커 색만 빠르게 업데이트
+renderMarkersPartial(coords, newStatus);
 
+// ✅ 선택: 보통은 제거 추천 (data 변경으로 렌더가 다시 일어나는 편)
+// setTimeout(() => renderMarkers(), 0);
 
-      const overlay = getActiveOverlay();
-      if (overlay) {
-        overlay.setMap(null);
-        setActiveOverlay(null);
-      }
+const overlay = getActiveOverlay();
+if (overlay) {
+  overlay.setMap(null);
+  setActiveOverlay(null);
+}
 
-      console.log("[DEBUG][STATUS] 🔁 전체 지도 최신화 완료");
+console.log("[DEBUG][STATUS] 🔁 전체 지도 최신화 완료");
+
     } catch (e) {
       console.error("[ERROR][STATUS] 저장 실패:", e.message);
     }
