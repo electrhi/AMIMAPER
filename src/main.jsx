@@ -130,10 +130,43 @@ const customEditDraftRef = useRef(null);
   // 🔹 마커 오버레이들을 유지하기 위한 ref
   const markersRef = useRef([]);
 
+  // ✅ (추가) "좌표/그룹"이 바뀌는 순간만 +1 (status 변경은 제외)
+  const [layoutVersion, setLayoutVersion] = useState(0);
+
+  // ✅ (추가) 좌표Key -> overlay, meter_id -> 좌표Key
+  const overlayByKeyRef = useRef(new Map());
+  const meterToKeyRef = useRef(new Map());
+
+  // ✅ (추가) 전체 렌더를 디바운스로 요청하기 위한 장치
+  const renderMarkersRefFn = useRef(null);
+  const requestFullRender = useRef(
+    debounce(() => {
+      renderMarkersRefFn.current?.();
+    }, 250)
+  );
+
+
   // ✅ 최신 data를 이벤트 핸들러에서 안전하게 쓰기 위한 ref
 const dataRef = useRef([]);
 useEffect(() => {
   dataRef.current = data;
+}, [data]);
+
+// ✅ status 변경으로 data가 바뀌어도 카운트는 항상 최신 유지 ✅✅✅
+useEffect(() => {
+  const next = { 완료: 0, 불가: 0, 미방문: 0 };
+
+  for (const r of data || []) {
+    next[r.status] = (next[r.status] || 0) + 1;
+  }
+
+  setCounts((prev) => {
+    const same =
+      prev.완료 === next.완료 &&
+      prev.불가 === next.불가 &&
+      prev.미방문 === next.미방문;
+    return same ? prev : next;
+  });
 }, [data]);
 
 // ✅ meters 최신 상태 캐시 (meter_id -> row)
@@ -149,14 +182,14 @@ const fetchMetersStatusByIds = async (meterIds) => {
 
   console.count("[DEBUG][FETCH] meters by ids"); // ✅ 호출 위치/횟수 추적
 
-  const seq = ++metersFetchSeqRef.current;
+  const dataFile = currentUser?.data_file;
+  if (!dataFile) return; // ✅ 여기서 한번만 체크
 
-  // ✅ 필요한 컬럼만 (select=* 금지)
+  const seq = ++metersFetchSeqRef.current;
   const columns = "meter_id,status,updated_at";
 
   let rows = [];
   for (const part of chunkArray(ids, 500)) {
-    const dataFile = currentUser?.data_file;
 if (!dataFile) return;
 
 const { data: chunkRows, error } = await supabase
@@ -194,6 +227,9 @@ const { data: chunkRows, error } = await supabase
       return m ? { ...row, status: m.status || row.status } : row;
     })
   );
+
+  // ✅ (추가) status만 바뀐 경우: 전체 renderMarkers 말고 해당 마커 색만 업데이트
+  updateMarkerColorsByMeterIds(ids, latest);
 };
 
 
@@ -357,7 +393,7 @@ rows.forEach((d) => {
       setData(merged);
 
       console.log("[DEBUG][DATA] ✅ 병합 완료:", merged.length);
-      setTimeout(() => renderMarkers(), 400);
+      requestFullRender.current();
     } catch (e) {
       console.error("[ERROR][DATA] 엑셀 로드 실패:", e.message);
     }
@@ -385,12 +421,12 @@ rows.forEach((d) => {
     document.head.appendChild(script);
   }, [loggedIn]);
 
-  // ✅ 지도 이동/줌 종료 시: 화면(bounds) 안에 있는 계기들만 상태 동기화 (디바운스)
-useEffect(() => {
+ useEffect(() => {
   if (!map || !window.kakao?.maps) return;
+  if (!currentUser?.data_file) return; // ✅ 추가: data_file 없으면 동기화하지 않음
 
   const syncInView = async () => {
-    console.count("[DEBUG][FETCH] sync in view"); // ✅ 호출 추적
+    console.count("[DEBUG][FETCH] sync in view");
 
     const b = map.getBounds();
     const sw = b.getSouthWest();
@@ -401,14 +437,10 @@ useEffect(() => {
     const neLat = ne.getLat();
     const neLng = ne.getLng();
 
-    // ✅ 현재 화면에 보이는 meter_id만 추림 (엑셀 좌표 기준)
     const visibleIds = [];
     for (const row of dataRef.current) {
       if (row.lat == null || row.lng == null) continue;
-      if (
-        row.lat >= swLat && row.lat <= neLat &&
-        row.lng >= swLng && row.lng <= neLng
-      ) {
+      if (row.lat >= swLat && row.lat <= neLat && row.lng >= swLng && row.lng <= neLng) {
         visibleIds.push(row.meter_id);
       }
     }
@@ -424,14 +456,14 @@ useEffect(() => {
   window.kakao.maps.event.addListener(map, "dragend", onDragEnd);
   window.kakao.maps.event.addListener(map, "zoom_changed", onZoomChanged);
 
-  // 최초 1회
   debounced();
 
   return () => {
     window.kakao.maps.event.removeListener(map, "dragend", onDragEnd);
     window.kakao.maps.event.removeListener(map, "zoom_changed", onZoomChanged);
   };
-}, [map]);
+}, [map, currentUser?.data_file]); // ✅ 변경
+
 
 
   /** Supabase에서 geoCache 파일 로드 (지오코딩 결과 JSON) **/
@@ -512,7 +544,7 @@ useEffect(() => {
         });
         setGeoCache(cleanedCache);
 
-        setTimeout(() => renderMarkers(), 800);
+        requestFullRender.current();
       } catch (err) {
         console.error("[ERROR][CACHE] 캐시 로드 실패:", err.message);
       }
@@ -577,7 +609,7 @@ useEffect(() => {
   /** 마커 개수 필터 적용 버튼 **/
   const handleApplyFilter = () => {
     console.log("[DEBUG][FILTER] 적용 시도, minMarkerCount =", minMarkerCount);
-    renderMarkers();
+    requestFullRender.current();
   };
 
 /** 최신 상태 가져오기 (DB 읽기 - 필요한 것만) **/
@@ -626,12 +658,11 @@ const getVisibleMeterIds = () => {
 };
 
   // ✅ 상태 필터/주소라벨 토글 바뀌면 지도 다시 반영
-useEffect(() => {
+  useEffect(() => {
   if (!map) return;
-  renderMarkers();
+  requestFullRender.current();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [statusFilter, showAddressLabels]);
-
+  }, [statusFilter, showAddressLabels]);
 
 
   // ✅ 거리 계산 함수 (미터 단위)
@@ -647,6 +678,60 @@ useEffect(() => {
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return R * c; // 미터 단위로 반환
   };
+
+    // ✅ status -> 색
+  const statusToColor = (s) =>
+    s === "완료" ? "green" : s === "불가" ? "red" : "blue";
+
+  // ✅ overlay 색상만 변경
+  const setOverlayColor = (overlay, status) => {
+    const el = overlay?.getContent?.();
+    if (!el) return;
+    el.style.background = statusToColor(status);
+    el.style.transition = "background 0.3s ease";
+  };
+
+  // ✅ (추가) meterIds가 속한 마커들만 찾아서 색만 업데이트
+  const updateMarkerColorsByMeterIds = (meterIds, latestMap = null) => {
+    if (!meterIds || meterIds.length === 0) return;
+
+    // ⚠️ 상태필터(완료/불가/미방문) 켜져 있으면, 표시/숨김이 바뀔 수 있으니 안전하게 전체 렌더
+    if (statusFilter) {
+      requestFullRender.current();
+      return;
+    }
+
+    const keys = new Set();
+    for (const id of meterIds) {
+      const key = meterToKeyRef.current.get(normalizeMeterId(id));
+      if (key) keys.add(key);
+    }
+
+    for (const key of keys) {
+      const ov = overlayByKeyRef.current.get(key);
+      if (!ov) continue;
+
+      // 이 마커에 묶인 계기들 중 아무거나 최신 status를 하나 찾음
+      let st = null;
+      const mids = ov.__meterIds || [];
+
+      for (const mid of mids) {
+        const norm = normalizeMeterId(mid);
+        const r = (latestMap && latestMap.get(norm)) || metersCacheRef.current.get(norm);
+        if (r?.status) { st = r.status; break; }
+      }
+
+      if (!st && mids[0]) {
+        const row = dataRef.current.find(
+          (d) => normalizeMeterId(d.meter_id) === normalizeMeterId(mids[0])
+        );
+        st = row?.status;
+      }
+
+      if (st) setOverlayColor(ov, st);
+    }
+  };
+
 
   const renderMarkersPartial = (coords, newStatus) => {
   const RADIUS = 1000; // 1km
@@ -775,7 +860,12 @@ useEffect(() => {
     }
 
     setData(matchedData);
+
+    // ✅ 좌표/그룹(레이아웃)이 바뀐 순간만 전체 렌더 필요 신호
+    setLayoutVersion((v) => v + 1);
+    
   }, [geoCache]);
+
 
   /** 마커 렌더링 **/
   const renderMarkers = async () => {
@@ -802,31 +892,25 @@ useEffect(() => {
       markersRef.current.forEach((m) => m.setMap(null));
       markersRef.current = [];
 
+      // ✅ (추가) 인덱스 초기화
+      overlayByKeyRef.current.clear();
+      meterToKeyRef.current.clear();
+
       // 🔹 기존 주소 라벨 제거
       addressOverlaysRef.current.forEach((ov) => ov.setMap(null));
       addressOverlaysRef.current = [];
 
       const grouped = {};
-      const statusCount = { 완료: 0, 불가: 0, 미방문: 0 };
-
-      // meter_id 기준 최신 데이터만 유지
+      
+      // ✅ meter_id 기준 최신 데이터만 유지 (counts는 useEffect([data])가 담당)
       const latestPerMeter = {};
       data.forEach((d) => {
-        statusCount[d.status] = (statusCount[d.status] || 0) + 1;
         if (!latestPerMeter[d.meter_id]) latestPerMeter[d.meter_id] = d;
       });
+      
       const filteredData = Object.values(latestPerMeter);
       const filteredForMap = statusFilter ? filteredData.filter((r) => r.status === statusFilter) : filteredData;
 
-
-      // 상태 카운트 최소 변경
-      setCounts((prev) => {
-        const same =
-          prev.완료 === statusCount.완료 &&
-          prev.불가 === statusCount.불가 &&
-          prev.미방문 === statusCount.미방문;
-        return same ? prev : statusCount;
-      });
 
       console.log(
         `[DEBUG][MAP] ✅ 데이터 정제 완료 — ${filteredForMap.length}건 처리 중...`
@@ -913,6 +997,15 @@ useEffect(() => {
         // ✅ Partial 업데이트용 좌표 박아두기 (무조건 숫자로 고정)
         overlay.__lat = Number(coords.lat);
         overlay.__lng = Number(coords.lng);
+
+        // ✅ (추가) 이 마커가 어떤 계기들을 포함하는지 저장 + 인덱스 등록
+        overlay.__key = key;
+        overlay.__meterIds = list.map((r) => normalizeMeterId(r.meter_id));
+
+        overlayByKeyRef.current.set(key, overlay);
+        for (const r of list) {
+          meterToKeyRef.current.set(normalizeMeterId(r.meter_id), key);
+        }
 
         overlay.setMap(map);
         markersRef.current.push(overlay);
@@ -1138,6 +1231,11 @@ useEffect(() => {
       console.error("[ERROR][MAP] 마커 렌더링 실패:", e);
     }
   };
+
+  // ✅ (추가) 디바운스 요청이 항상 최신 renderMarkers를 부르게 연결
+  useEffect(() => {
+    renderMarkersRefFn.current = renderMarkers;
+  });
 
     const clearCustomMarkerObjects = () => {
     customMarkerObjsRef.current.forEach((o) => {
@@ -1469,52 +1567,14 @@ const openCustomMarkerEditor = (markerObj) => {
     closeCustomInputOverlay();
   };
 
-
-  /** ✅ 마커 렌더링 자동 트리거 (지도, 데이터, geoCache 모두 준비된 뒤 실행) **/
+  // ✅ (변경) "좌표/그룹이 바뀌는 순간(layoutVersion)"에만 전체 renderMarkers 실행
   useEffect(() => {
-    let checkCount = 0;
-    const maxWait = 50; // 최대 5초까지 대기
+    if (!map || !window.kakao?.maps) return;
+    if (layoutVersion === 0) return; // 아직 좌표 매칭 전
 
-    const waitForReady = async () => {
-      checkCount++;
+    requestFullRender.current(); // 디바운스로 전체 렌더 요청
+  }, [map, layoutVersion]);
 
-      // Kakao SDK 로드 확인
-      if (typeof window.kakao === "undefined" || !window.kakao.maps) {
-        console.log(
-          `[DEBUG][MAP] ⚙️ Kakao SDK 아직 로드 안됨 (${checkCount}/${maxWait})`
-        );
-        if (checkCount < maxWait) return setTimeout(waitForReady, 100);
-        console.warn("[DEBUG][MAP] ❌ Kakao SDK 로드 실패로 렌더링 중단");
-        return;
-      }
-
-      const ready =
-        map instanceof window.kakao.maps.Map &&
-        data.length > 0 &&
-        Object.keys(geoCache).length > 0;
-
-      if (!ready) {
-        if (checkCount <= maxWait) {
-          console.log(
-            `[DEBUG][MAP] ⏳ 준비 대기중 (${checkCount}/${maxWait}) → map:${
-              !!map
-            }, data:${data.length}, geoCache:${Object.keys(geoCache).length}`
-          );
-          return setTimeout(waitForReady, 100);
-        } else {
-          console.warn(
-            "[DEBUG][MAP] ⚠️ 지도 또는 데이터 준비 지연으로 렌더 스킵"
-          );
-          return;
-        }
-      }
-
-      console.log("[DEBUG][MAP] ✅ 모든 요소 준비 완료 → 마커 렌더링 실행");
-      await renderMarkers();
-    };
-
-    waitForReady();
-  }, [map, data, geoCache]);
 
   // 🔹 줌 레벨에 따라 주소 라벨 토글
   useEffect(() => {
@@ -1665,8 +1725,12 @@ setData((prev) =>
 // ✅ 최신 상태는 "방금 업데이트한 계기들만" 반영 (1번만)
 await fetchLatestStatus(payload.map((p) => p.meter_id));
 
-// ✅ 전체 재렌더 대신 근처 마커 색만 빠르게 업데이트
-renderMarkersPartial(coords, newStatus);
+// ✅ 전체 재렌더 대신 "이번에 바꾼 meterIds가 속한 마커"만 색상 업데이트
+const tmpLatest = new Map(
+  payload.map((p) => [p.meter_id, { status: newStatus }])
+);
+updateMarkerColorsByMeterIds(payload.map((p) => p.meter_id), tmpLatest);
+
 
 // ✅ 선택: 보통은 제거 추천 (data 변경으로 렌더가 다시 일어나는 편)
 // setTimeout(() => renderMarkers(), 0);
