@@ -1625,6 +1625,7 @@ if (upsertError) throw upsertError;
 
       // ✅ 2) user_last_locations는 "유저 마지막 위치" (유저당 1행 유지)
 const lastAddress = payload[0]?.address || "";
+
 const { error: lastLocError } = await supabase
   .from("user_last_locations")
   .upsert(
@@ -1641,7 +1642,13 @@ const { error: lastLocError } = await supabase
   )
   .select("user_id"); // ✅ 응답 최소화
 
-if (lastLocError) throw lastLocError;
+// ✅ 임시 해결: view라서 저장이 실패할 수 있으니, throw 하지 말고 경고만 찍고 계속 진행
+if (lastLocError) {
+  console.warn(
+    "[WARN][LASTLOC] user_last_locations 저장 실패(무시):",
+    lastLocError.message
+  );
+}
 
 console.log("[DEBUG][STATUS] ✅ DB 업데이트 완료:", payload);
 
