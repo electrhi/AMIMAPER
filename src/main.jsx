@@ -2633,8 +2633,7 @@ useEffect(() => {
     </label>
   );
 })}
-
-// (선택) 전체 리셋 버튼 하나 두면 편함
+    
 <button
   onClick={() => setStatusFilters([...STATUS_OPTIONS])}
   style={{
