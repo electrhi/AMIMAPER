@@ -15,6 +15,43 @@ const normalizeMeterId = (id) =>
     .replace(/[\s\u00A0\u200B-\u200D\uFEFF]/g, "")
     .trim();
 
+// ✅ 상태 옵션(필터용)
+const STATUS_OPTIONS = ["완료", "불가", "미방문"];
+
+// ✅ 계기 타입 매핑(기존 renderMarkers 안에 있던 내용 그대로 이동)
+const METER_MAPPING = {
+  "17": "E-Type",
+  "18": "E-Type",
+  "19": "Adv-E",
+  "25": "G-Type",
+  "26": "G-Type",
+  "27": "G-Type",
+  "45": "G-Type",
+  "46": "G-Type",
+  "47": "G-Type",
+  "01": "표준형",
+  "03": "표준형",
+  "14": "표준형",
+  "15": "표준형",
+  "34": "표준형",
+  "35": "표준형",
+  "51": "AMIGO",
+  "52": "AMIGO",
+  "53": "AMIGO",
+  "54": "AMIGO",
+  "55": "AMIGO",
+  "56": "AMIGO",
+  "57": "AMIGO",
+};
+
+// ✅ meter_id → 계기타입
+const getMeterType = (meterId) => {
+  const id = String(meterId ?? "");
+  const mid = id.substring(2, 4); // 기존 로직 유지
+  return METER_MAPPING[mid] || "확인필요";
+};
+
+
 // ✅ debounce (300~500ms 권장)
 const debounce = (fn, delay = 400) => {
   let t;
@@ -56,33 +93,61 @@ function App() {
   // ✅ 마커 개수 필터 (입력 숫자 이상만 표시, 비어 있으면 전체)
   const [minMarkerCount, setMinMarkerCount] = useState("");
 
-  // ✅ 상태 필터(좌상단 탭): null이면 전체
-const [statusFilter, setStatusFilter] = useState(null); // "완료" | "불가" | "미방문" | null
+  // ✅ 상태 필터(다중 체크): [] 이면 "전체"로 취급
+  const [statusFilters, setStatusFilters] = useState([...STATUS_OPTIONS]);
 
-// ✅ 주소 라벨 ON/OFF
-const [showAddressLabels, setShowAddressLabels] = useState(true);
+  // ✅ 계기타입 필터(다중 체크): [] 이면 "전체"로 취급
+  const [meterTypeFilters, setMeterTypeFilters] = useState([]);
 
-// ✅ 모바일 여부(터치 영역/패널 스케일 조절)
-const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 520);
-useEffect(() => {
-  const onResize = () => setIsMobile(window.innerWidth <= 520);
-  window.addEventListener("resize", onResize);
-  return () => window.removeEventListener("resize", onResize);
-}, []);
+  // ✅ 현재 데이터에 존재하는 계기타입 목록(필터 UI용)
+  const availableMeterTypes = React.useMemo(() => {
+    const s = new Set();
+    for (const r of data || []) {
+      const t = getMeterType(r?.meter_id);
+      if (t) s.add(t);
+    }
+    return Array.from(s).sort();
+  }, [data]);
 
-// ✅ 임의 마커 수정/삭제용 오버레이
-const customEditOverlayRef = useRef(null);
-const editingCustomIdRef = useRef(null);
-const customEditDraftRef = useRef(null);
+  // ✅ "표시/숨김이 바뀔 수 있는 필터"가 켜져 있나?
+  const isStatusFilterActive =
+    statusFilters.length > 0 && statusFilters.length < STATUS_OPTIONS.length;
+  const isMeterTypeFilterActive = meterTypeFilters.length > 0;
+
+
+  // ✅ 주소 라벨 ON/OFF
+  const [showAddressLabels, setShowAddressLabels] = useState(true);
+
+  // ✅ 검색창 (리스트번호/계기번호/주소)
+  const [searchText, setSearchText] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchOpen, setSearchOpen] = useState(false);
+
+  // ✅ 검색/필터 패널 열기 토글(UI만)
+  const [searchPanelOpen, setSearchPanelOpen] = useState(false);
+  const [filterPanelOpen, setFilterPanelOpen] = useState(false);
+
+  // ✅ 모바일 여부(터치 영역/패널 스케일 조절)
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 520);
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth <= 520);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  // ✅ 임의 마커 수정/삭제용 오버레이
+  const customEditOverlayRef = useRef(null);
+  const editingCustomIdRef = useRef(null);
+  const customEditDraftRef = useRef(null);
 
 
   // ✅ 관리자 여부
- const isAdmin =
-  currentUser?.can_view_others === true ||
-  String(currentUser?.can_view_others || "").toLowerCase() === "y";
+  const isAdmin =
+    currentUser?.can_view_others === true ||
+    String(currentUser?.can_view_others || "").toLowerCase() === "y";
 
 
-    // 🔴 내 위치(방향 화살표) 엘리먼트 ref
+  // 🔴 내 위치(방향 화살표) 엘리먼트 ref
   const myLocationArrowElRef = useRef(null);
 
   // 🔴 내 위치 이전값 저장(방향 계산용)
@@ -657,12 +722,136 @@ const getVisibleMeterIds = () => {
   return Array.from(new Set(ids.map(normalizeMeterId))).filter(Boolean);
 };
 
+  // ✅ 검색 결과로 이동
+const moveToSearchResult = async (item) => {
+  if (!map || !window.kakao?.maps) return;
+
+  const lat = Number(item?.lat);
+  const lng = Number(item?.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+  const p = new window.kakao.maps.LatLng(lat, lng);
+
+  // 너무 멀리서 검색했을 때만 적당히 확대(기존 사용자 줌을 최대한 존중)
+  try {
+    const cur = map.getLevel();
+    if (cur > 5) map.setLevel(5);
+  } catch {}
+
+  map.panTo(p);
+
+  setSearchOpen(false);
+  setSearchPanelOpen(false); // ✅ 검색 결과 클릭 시 검색 패널도 같이 닫
+
+  // 이동 후 화면 내 최신 상태 동기화(기존 로직 재사용)
+  setTimeout(() => {
+    try {
+      const visible = getVisibleMeterIds();
+      fetchLatestStatus(visible);
+    } catch {}
+  }, 350);
+
+  // 모바일 키보드 닫기
+  try {
+    document.activeElement?.blur?.();
+  } catch {}
+};
+
+// ✅ 검색 실행
+const runSearch = () => {
+  const qRaw = (searchText || "").trim();
+  if (!qRaw) {
+    setSearchResults([]);
+    setSearchOpen(false);
+    return;
+  }
+
+  const qList = qRaw; // 리스트번호는 원문 기준 includes
+  const qMeter = normalizeMeterId(qRaw); // 계기번호는 normalize 기준
+  const qAddr = qRaw.replace(/\s+/g, "").toLowerCase(); // 주소는 공백 제거 + 소문자
+
+  // 최신 per meter만(중복 방지)
+  const latestPerMeter = new Map();
+  for (const r of dataRef.current || []) {
+    const mid = normalizeMeterId(r?.meter_id);
+    if (!mid) continue;
+    if (!latestPerMeter.has(mid)) latestPerMeter.set(mid, r);
+  }
+
+  const matches = [];
+  for (const r of latestPerMeter.values()) {
+    const listNo = String(r?.list_no ?? "").trim();
+    const meter = normalizeMeterId(r?.meter_id);
+    const addr = String(r?.address ?? "").trim();
+    const addrNorm = addr.replace(/\s+/g, "").toLowerCase();
+
+    const hit =
+      (listNo && listNo.includes(qList)) ||
+      (meter && qMeter && meter.includes(qMeter)) ||
+      (addrNorm && qAddr && addrNorm.includes(qAddr));
+
+    if (hit) matches.push(r);
+  }
+
+  const matchedTotal = matches.length;
+
+  // 같은 마커(같은 좌표)로 묶기 (좌표 없는 건 제외)
+  const byKey = new Map();
+  for (const r of matches) {
+    if (r?.lat == null || r?.lng == null) continue;
+    const key = `${r.lat},${r.lng}`;
+    const prev = byKey.get(key);
+    if (!prev) byKey.set(key, { row: r, count: 1 });
+    else prev.count += 1;
+  }
+
+  const results = Array.from(byKey.values()).map((x) => ({
+    key: `${x.row.lat},${x.row.lng}`,
+    lat: Number(x.row.lat),
+    lng: Number(x.row.lng),
+    address: x.row.address,
+    meter_id: x.row.meter_id,
+    list_no: x.row.list_no,
+    count: x.count,
+  }));
+
+  results.sort((a, b) => b.count - a.count);
+
+  setSearchResults(results);
+  setSearchOpen(true);
+
+  if (results.length === 1) {
+    moveToSearchResult(results[0]);
+    return;
+  }
+
+  if (results.length === 0) {
+    if (matchedTotal > 0) alert("검색 결과는 있지만 좌표가 없어 이동할 수 없습니다.");
+    else alert("검색 결과가 없습니다.");
+    setSearchOpen(false);
+  }
+};
+
+
   // ✅ 상태 필터/주소라벨 토글 바뀌면 지도 다시 반영
   useEffect(() => {
   if (!map) return;
   requestFullRender.current();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusFilter, showAddressLabels]);
+  }, [statusFilters, meterTypeFilters, showAddressLabels]);
+
+
+  // ✅ 검색 결과 바깥 클릭 시 닫기
+  useEffect(() => {
+    const onDocDown = (e) => {
+      const root = document.getElementById("amimap-searchbox");
+      if (!root) return;
+      if (!root.contains(e.target)) setSearchOpen(false);
+    };
+    document.addEventListener("pointerdown", onDocDown);
+    return () => document.removeEventListener("pointerdown", onDocDown);
+  }, []);
+
 
 
   // ✅ 거리 계산 함수 (미터 단위)
@@ -695,11 +884,12 @@ const getVisibleMeterIds = () => {
   const updateMarkerColorsByMeterIds = (meterIds, latestMap = null) => {
     if (!meterIds || meterIds.length === 0) return;
 
-    // ⚠️ 상태필터(완료/불가/미방문) 켜져 있으면, 표시/숨김이 바뀔 수 있으니 안전하게 전체 렌더
-    if (statusFilter) {
+    // ⚠️ 상태/계기타입 필터가 켜져 있으면 표시/숨김이 바뀔 수 있으니 전체 렌더가 안전
+    if (isStatusFilterActive || isMeterTypeFilterActive) {
       requestFullRender.current();
       return;
     }
+
 
     const keys = new Set();
     for (const id of meterIds) {
@@ -909,7 +1099,16 @@ const getVisibleMeterIds = () => {
       });
       
       const filteredData = Object.values(latestPerMeter);
-      const filteredForMap = statusFilter ? filteredData.filter((r) => r.status === statusFilter) : filteredData;
+      // ✅ [] 이면 전체로 취급
+      const statusSet = statusFilters.length ? new Set(statusFilters) : null;
+      const typeSet = meterTypeFilters.length ? new Set(meterTypeFilters) : null;
+      
+      const filteredForMap = filteredData.filter((r) => {
+        const okStatus = !statusSet || statusSet.has(r.status);
+        const okType = !typeSet || typeSet.has(getMeterType(r.meter_id));
+        return okStatus && okType;
+      });
+
 
 
       console.log(
@@ -932,31 +1131,6 @@ const getVisibleMeterIds = () => {
         grouped[key].list.push(row);
       }
 
-      // 계기 타입 매핑
-      const meter_mapping = {
-        "17": "E-Type",
-        "18": "E-Type",
-        "19": "Adv-E",
-        "25": "G-Type",
-        "26": "G-Type",
-        "27": "G-Type",
-        "45": "G-Type",
-        "46": "G-Type",
-        "47": "G-Type",
-        "01": "표준형",
-        "03": "표준형",
-        "14": "표준형",
-        "15": "표준형",
-        "34": "표준형",
-        "35": "표준형",
-        "51": "AMIGO",
-        "52": "AMIGO",
-        "53": "AMIGO",
-        "54": "AMIGO",
-        "55": "AMIGO",
-        "56": "AMIGO",
-        "57": "AMIGO",
-      };
 
       let markerCount = 0;
       Object.keys(grouped).forEach((key) => {
@@ -1114,8 +1288,7 @@ const getVisibleMeterIds = () => {
             const row =
               list.find((g) => String(g.meter_id || "") === id) || {};
 
-            const mid = id.substring(2, 4);
-            const type = meter_mapping[mid] || "확인필요";
+            const type = getMeterType(id);
 
             const listNo = row.list_no || "";
             const commType = row.comm_type || "";
@@ -2075,8 +2248,336 @@ useEffect(() => {
 
   /** 지도 UI **/
   return (
+    
     <div style={{ width: "100%", height: "100vh", position: "relative" }}>
-        {/* 왼쪽 상단 상태 카운트 + 마커 개수 필터 */}
+
+      {/* 🔎 검색 패널(버튼 눌렀을 때만 표시) */}
+{searchPanelOpen && (
+  <div
+    style={{
+      position: "fixed",
+      inset: 0,
+      zIndex: 1000000,
+      background: "rgba(0,0,0,0.25)",
+      display: "flex",
+      justifyContent: "center",
+      alignItems: "flex-start",
+      paddingTop: 12,
+    }}
+    onClick={() => {
+      setSearchPanelOpen(false);
+      setSearchOpen(false);
+    }}
+  >
+    <div
+      id="amimap-searchbox"
+      style={{
+        width: isMobile ? "92vw" : "520px",
+        maxWidth: "520px",
+      }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div
+        style={{
+          display: "flex",
+          gap: 8,
+          alignItems: "center",
+          background: "rgba(255,255,255,0.98)",
+          padding: isMobile ? "12px 12px" : "10px 12px",
+          borderRadius: "14px",
+          boxShadow: "0 2px 12px rgba(0,0,0,0.22)",
+          border: "1px solid rgba(0,0,0,0.08)",
+        }}
+      >
+        <input
+          value={searchText}
+          onChange={(e) => {
+            setSearchText(e.target.value);
+            const v = (e.target.value || "").trim();
+            if (!v) setSearchOpen(false);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") runSearch();
+          }}
+          placeholder="리스트번호 / 계기번호 / 주소 검색"
+          style={{
+            flex: 1,
+            padding: isMobile ? "14px 12px" : "12px 12px",
+            borderRadius: "12px",
+            border: "1px solid #ddd",
+            outline: "none",
+            fontSize: isMobile ? "16px" : "14px",
+            boxSizing: "border-box",
+          }}
+        />
+
+        {searchText?.trim() && (
+          <button
+            onClick={() => {
+              setSearchText("");
+              setSearchResults([]);
+              setSearchOpen(false);
+            }}
+            style={{
+              padding: isMobile ? "14px 12px" : "12px 12px",
+              borderRadius: "12px",
+              border: "1px solid #ddd",
+              background: "#fff",
+              cursor: "pointer",
+              fontWeight: 900,
+              fontSize: isMobile ? "14px" : "12px",
+              whiteSpace: "nowrap",
+            }}
+          >
+            ✕
+          </button>
+        )}
+
+        <button
+          onClick={runSearch}
+          style={{
+            padding: isMobile ? "14px 14px" : "12px 12px",
+            borderRadius: "12px",
+            border: "none",
+            background: "#007bff",
+            color: "white",
+            cursor: "pointer",
+            fontWeight: 900,
+            fontSize: isMobile ? "14px" : "12px",
+            whiteSpace: "nowrap",
+          }}
+        >
+          검색
+        </button>
+
+        <button
+          onClick={() => {
+            setSearchPanelOpen(false);
+            setSearchOpen(false);
+          }}
+          style={{
+            padding: isMobile ? "14px 12px" : "12px 12px",
+            borderRadius: "12px",
+            border: "1px solid #ddd",
+            background: "#fff",
+            cursor: "pointer",
+            fontWeight: 900,
+            fontSize: isMobile ? "14px" : "12px",
+            whiteSpace: "nowrap",
+          }}
+        >
+          닫기
+        </button>
+      </div>
+
+      {searchOpen && searchResults.length > 1 && (
+        <div
+          style={{
+            marginTop: 8,
+            background: "rgba(255,255,255,0.98)",
+            border: "1px solid rgba(0,0,0,0.08)",
+            borderRadius: "14px",
+            boxShadow: "0 2px 12px rgba(0,0,0,0.18)",
+            overflow: "hidden",
+            maxHeight: isMobile ? "55vh" : "360px",
+            overflowY: "auto",
+          }}
+        >
+          {searchResults.slice(0, 25).map((r) => (
+            <button
+              key={r.key}
+              onClick={() => moveToSearchResult(r)}
+              style={{
+                width: "100%",
+                textAlign: "left",
+                border: "none",
+                background: "transparent",
+                cursor: "pointer",
+                padding: isMobile ? "14px 12px" : "12px 12px",
+                borderBottom: "1px solid rgba(0,0,0,0.06)",
+              }}
+            >
+              <div style={{ fontWeight: 900, fontSize: isMobile ? "15px" : "13px" }}>
+                {r.address || "(주소 없음)"} {r.count > 1 ? `(+${r.count - 1})` : ""}
+              </div>
+              <div style={{ marginTop: 3, color: "#666", fontSize: isMobile ? "13px" : "11px" }}>
+                리스트번호: {r.list_no || "-"} · 계기번호: {r.meter_id || "-"}
+              </div>
+            </button>
+          ))}
+          {searchResults.length > 25 && (
+            <div style={{ padding: "10px 12px", fontSize: "12px", color: "#666" }}>
+              결과가 많아 25개까지만 표시합니다. 검색어를 더 구체적으로 입력해주세요.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  </div>
+)}
+
+      {/* ⚙️ 마커 개수 필터 패널(버튼 눌렀을 때만 표시) */}
+      {filterPanelOpen && (
+  <div
+    style={{
+      position: "fixed",
+      inset: 0,
+      zIndex: 1000000,
+      background: "rgba(0,0,0,0.25)",
+      display: "flex",
+      justifyContent: "center",
+      alignItems: "flex-start",
+      paddingTop: 70,
+    }}
+    onClick={() => setFilterPanelOpen(false)}
+  >
+    <div
+      style={{
+        width: isMobile ? "92vw" : "380px",
+        background: "rgba(255,255,255,0.98)",
+        borderRadius: "14px",
+        boxShadow: "0 2px 12px rgba(0,0,0,0.22)",
+        border: "1px solid rgba(0,0,0,0.08)",
+        padding: "12px",
+      }}
+      onClick={(e) => e.stopPropagation()}
+      >
+      
+      <div style={{ fontWeight: 900, fontSize: isMobile ? "16px" : "14px", marginBottom: 10 }}>
+        마커 개수 필터
+      </div>
+
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <input
+          type="number"
+          min="1"
+          value={minMarkerCount}
+          onChange={(e) => setMinMarkerCount(e.target.value)}
+          placeholder="예: 3"
+          style={{
+            flex: 1,
+            padding: isMobile ? "14px 12px" : "12px 10px",
+            fontSize: isMobile ? "16px" : "14px",
+            borderRadius: "12px",
+            border: "1px solid #ccc",
+            boxSizing: "border-box",
+          }}
+        />
+        <button
+          onClick={() => {
+            handleApplyFilter();
+            setFilterPanelOpen(false);
+          }}
+          style={{
+            padding: isMobile ? "14px 14px" : "12px 12px",
+            fontSize: isMobile ? "14px" : "12px",
+            borderRadius: "12px",
+            border: "none",
+            background: "#007bff",
+            color: "white",
+            cursor: "pointer",
+            fontWeight: 900,
+            whiteSpace: "nowrap",
+          }}
+        >
+          적용
+        </button>
+        <button
+          onClick={() => setFilterPanelOpen(false)}
+          style={{
+            padding: isMobile ? "14px 12px" : "12px 12px",
+            fontSize: isMobile ? "14px" : "12px",
+            borderRadius: "12px",
+            border: "1px solid #ddd",
+            background: "#fff",
+            cursor: "pointer",
+            fontWeight: 900,
+            whiteSpace: "nowrap",
+          }}
+        >
+          닫기
+        </button>
+      </div>
+
+      <div style={{ marginTop: 8, fontSize: isMobile ? "13px" : "12px", color: "#555" }}>
+        비우면 전체 표시
+      </div>
+
+      <div style={{ marginTop: 14, borderTop: "1px solid rgba(0,0,0,0.08)", paddingTop: 12 }}>
+  <div style={{ fontWeight: 900, fontSize: isMobile ? "16px" : "14px", marginBottom: 8 }}>
+    계기 타입 필터
+  </div>
+
+  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+    <button
+      onClick={() => setMeterTypeFilters([])} // [] = 전체
+      style={{
+        padding: isMobile ? "10px 10px" : "7px 8px",
+        borderRadius: "10px",
+        border: "1px solid #ddd",
+        background: meterTypeFilters.length === 0 ? "#f1f3f5" : "#fff",
+        fontWeight: 900,
+        cursor: "pointer",
+        fontSize: isMobile ? "13px" : "12px",
+      }}
+    >
+      전체
+    </button>
+
+    {availableMeterTypes.map((t) => {
+      const checked = meterTypeFilters.length === 0 || meterTypeFilters.includes(t);
+
+      const toggle = () => {
+        setMeterTypeFilters((prev) => {
+          const base = prev.length === 0 ? [...availableMeterTypes] : [...prev];
+          const has = base.includes(t);
+          const next = has ? base.filter((x) => x !== t) : [...base, t];
+          // next가 []면 전체로 처리하려면 [] 유지(=전체 표시)
+          return next;
+        });
+      };
+
+      return (
+        <label
+          key={t}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            cursor: "pointer",
+            userSelect: "none",
+            padding: isMobile ? "10px 10px" : "7px 8px",
+            borderRadius: "10px",
+            border: "1px solid rgba(0,0,0,0.08)",
+            background: checked ? "#f1f3f5" : "#fff",
+            fontWeight: 900,
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={checked}
+            onChange={toggle}
+            style={{ width: 16, height: 16 }}
+          />
+          <span style={{ fontSize: isMobile ? "14px" : "12px" }}>{t}</span>
+        </label>
+      );
+    })}
+  </div>
+
+  <div style={{ marginTop: 8, fontSize: isMobile ? "13px" : "12px", color: "#555" }}>
+    아무것도 선택 안 하면 전체 표시
+  </div>
+</div>
+      </div>
+    </div>
+  </div>
+)}
+
+
+
+      
+      {/* 왼쪽 상단 상태 카운트 + 마커 개수 필터 */}
 
       <div
   style={{
@@ -2097,27 +2598,67 @@ useEffect(() => {
 >
   {/* ✅ 상태 탭(터치 필터) */}
   <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-    {["완료", "불가", "미방문"].map((s) => {
-      const active = statusFilter === s;
-      return (
-        <button
-          key={s}
-          onClick={() => setStatusFilter((prev) => (prev === s ? null : s))}
-          style={{
-            border: "none",
-            background: "transparent",
-            padding: isMobile ? "10px 10px" : "7px 8px", // ✅ 터치영역 크게
-            fontWeight: 900,
-            fontSize: isMobile ? "14px" : "12px",
-            cursor: "pointer",
-            textDecoration: active ? "underline" : "none",
-            textUnderlineOffset: "6px",
-          }}
-        >
-          {s} {counts[s] || 0}
-        </button>
-      );
-    })}
+
+    {STATUS_OPTIONS.map((s) => {
+  // statusFilters가 비어있으면 "전체"로 취급 → 모두 체크된 것처럼 보이게
+  const checked = statusFilters.length === 0 || statusFilters.includes(s);
+  
+  const toggle = () => {
+    setStatusFilters((prev) => {
+      const base = prev.length === 0 ? [...STATUS_OPTIONS] : [...prev]; // 전체 상태에서 출발
+      const has = base.includes(s);
+      const next = has ? base.filter((x) => x !== s) : [...base, s];
+      // next가 []가 되면 "전체"로 처리(= prev를 []로 두면 모두 체크처럼 보임)
+      return next;
+    });
+  };
+
+  return (
+    <label
+      key={s}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        cursor: "pointer",
+        userSelect: "none",
+        padding: isMobile ? "10px 10px" : "7px 8px",
+        borderRadius: "10px",
+        border: "1px solid rgba(0,0,0,0.08)",
+        background: checked ? "#f1f3f5" : "#fff",
+        fontWeight: 900,
+      }}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={toggle}
+        style={{ width: 16, height: 16 }}
+      />
+      <span style={{ fontSize: isMobile ? "14px" : "12px" }}>
+        {s} {counts[s] || 0}
+      </span>
+    </label>
+  );
+})}
+
+// (선택) 전체 리셋 버튼 하나 두면 편함
+<button
+  onClick={() => setStatusFilters([...STATUS_OPTIONS])}
+  style={{
+    marginLeft: "auto",
+    padding: isMobile ? "10px 10px" : "7px 8px",
+    borderRadius: "10px",
+    border: "1px solid #ddd",
+    background: "#fff",
+    fontWeight: 900,
+    cursor: "pointer",
+    fontSize: isMobile ? "13px" : "12px",
+  }}
+>
+  상태 전체
+</button>
+
 
     {/* ✅ 주소 라벨 토글 */}
     <button
@@ -2137,47 +2678,62 @@ useEffect(() => {
     </button>
   </div>
 
-  {/* 마커 개수 필터 */}
-  <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #eee" }}>
-    <div style={{ marginBottom: 6, fontWeight: 900 }}>마커 개수 필터</div>
-    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-      <input
-        type="number"
-        min="1"
-        value={minMarkerCount}
-        onChange={(e) => setMinMarkerCount(e.target.value)}
-        placeholder="예: 3"
-        style={{
-          width: isMobile ? "90px" : "70px",
-          padding: isMobile ? "10px 10px" : "6px 8px",
-          fontSize: isMobile ? "14px" : "12px",
-          borderRadius: "10px",
-          border: "1px solid #ccc",
-          boxSizing: "border-box",
-        }}
-      />
-      <button
-        onClick={handleApplyFilter}
-        style={{
-          padding: isMobile ? "10px 14px" : "7px 10px",
-          fontSize: isMobile ? "14px" : "12px",
-          borderRadius: "10px",
-          border: "none",
-          background: "#007bff",
-          color: "white",
-          cursor: "pointer",
-          fontWeight: 900,
-          whiteSpace: "nowrap",
-        }}
-      >
-        적용
-      </button>
-    </div>
-    <div style={{ marginTop: 4, fontSize: isMobile ? "12px" : "11px", color: "#555" }}>
-      비우면 전체 표시 / 상태 탭은 한번 더 누르면 전체
-    </div>
-  </div>
+    {/* ✅ 검색/필터 버튼 (패널로 열기) */}
+<div style={{ marginTop: 8, display: "flex", gap: 8 }}>
+  <button
+    onClick={() => {
+      setFilterPanelOpen(false);
+      setSearchPanelOpen(true);
+
+      // 검색 결과 리스트 닫아두고 시작(원하면 유지해도 됨)
+      // setSearchOpen(false);
+
+      setTimeout(() => {
+        try {
+          document
+            .getElementById("amimap-searchbox")
+            ?.querySelector("input")
+            ?.focus?.();
+        } catch {}
+      }, 0);
+    }}
+    style={{
+      flex: 1,
+      padding: isMobile ? "10px 10px" : "7px 8px",
+      borderRadius: "10px",
+      border: "1px solid #ddd",
+      background: "#fff",
+      fontWeight: 900,
+      cursor: "pointer",
+      fontSize: isMobile ? "13px" : "12px",
+      whiteSpace: "nowrap",
+    }}
+  >
+    🔎 검색
+  </button>
+
+  <button
+    onClick={() => {
+      setSearchPanelOpen(false);
+      setSearchOpen(false);
+      setFilterPanelOpen(true);
+    }}
+    style={{
+      flex: 1,
+      padding: isMobile ? "10px 10px" : "7px 8px",
+      borderRadius: "10px",
+      border: "1px solid #ddd",
+      background: "#fff",
+      fontWeight: 900,
+      cursor: "pointer",
+      fontSize: isMobile ? "13px" : "12px",
+      whiteSpace: "nowrap",
+    }}
+  >
+    ⚙️ 필터
+  </button>
 </div>
+      </div>
 
 
       {/* ➕ 임의 마커 추가 버튼 (오른쪽 상단) */}
