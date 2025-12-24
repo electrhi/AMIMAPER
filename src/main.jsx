@@ -118,6 +118,50 @@ function App() {
   // ✅ 주소 라벨 ON/OFF
   const [showAddressLabels, setShowAddressLabels] = useState(true);
 
+  // ✅ 미좌표(좌표 없는) 목록 모달
+const [noCoordModalOpen, setNoCoordModalOpen] = useState(false);
+
+// ✅ 좌표 없는 항목만 따로 모으기(중복 meter_id 제거)
+const noCoordRows = React.useMemo(() => {
+  const latest = new Map(); // meter_id -> row
+
+  for (const r of data || []) {
+    const mid = normalizeMeterId(r?.meter_id);
+    if (!mid) continue;
+
+    const latN = Number(r?.lat);
+    const lngN = Number(r?.lng);
+
+    // 좌표가 정상(finite)이면 제외
+    if (Number.isFinite(latN) && Number.isFinite(lngN)) continue;
+
+    // meter_id 중복 제거 (첫 1개만 유지)
+    if (!latest.has(mid)) latest.set(mid, r);
+  }
+
+  const out = Array.from(latest.values());
+
+  // 정렬: 리스트번호 -> 계기번호 -> 주소
+  out.sort((a, b) => {
+    const aList = String(a?.list_no ?? "");
+    const bList = String(b?.list_no ?? "");
+    const aNum = parseInt(aList, 10);
+    const bNum = parseInt(bList, 10);
+
+    if (!Number.isNaN(aNum) && !Number.isNaN(bNum) && aNum !== bNum) return aNum - bNum;
+    if (aList !== bList) return aList.localeCompare(bList, "ko-KR", { numeric: true });
+
+    const aMid = normalizeMeterId(a?.meter_id);
+    const bMid = normalizeMeterId(b?.meter_id);
+    if (aMid !== bMid) return aMid.localeCompare(bMid, "ko-KR", { numeric: true });
+
+    return String(a?.address ?? "").localeCompare(String(b?.address ?? ""), "ko-KR");
+  });
+
+  return out;
+}, [data]);
+
+
   // ✅ 검색창 (리스트번호/계기번호/주소)
   const [searchText, setSearchText] = useState("");
   const [searchResults, setSearchResults] = useState([]);
@@ -504,13 +548,17 @@ rows.forEach((d) => {
 
     const visibleIds = [];
     for (const row of dataRef.current) {
-      if (row.lat == null || row.lng == null) continue;
-      if (row.lat >= swLat && row.lat <= neLat && row.lng >= swLng && row.lng <= neLng) {
+      const latN = Number(row?.lat);
+      const lngN = Number(row?.lng);
+      if (!Number.isFinite(latN) || !Number.isFinite(lngN)) continue;
+
+      if (latN >= swLat && latN <= neLat && lngN >= swLng && lngN <= neLng) {
         visibleIds.push(row.meter_id);
       }
     }
 
     await fetchLatestStatus(visibleIds);
+
   };
 
   const debounced = debounce(syncInView, 400);
@@ -709,15 +757,18 @@ const getVisibleMeterIds = () => {
 
   const ids = [];
   for (const row of dataRef.current) {
-    if (row.lat == null || row.lng == null) continue;
+    const latN = Number(row?.lat);
+    const lngN = Number(row?.lng);
+    if (!Number.isFinite(latN) || !Number.isFinite(lngN)) continue;
 
     if (
-      row.lat >= swLat && row.lat <= neLat &&
-      row.lng >= swLng && row.lng <= neLng
+      latN >= swLat && latN <= neLat &&
+      lngN >= swLng && lngN <= neLng
     ) {
       ids.push(row.meter_id);
     }
   }
+
 
   return Array.from(new Set(ids.map(normalizeMeterId))).filter(Boolean);
 };
@@ -746,8 +797,7 @@ const moveToSearchResult = async (item) => {
   // 이동 후 화면 내 최신 상태 동기화(기존 로직 재사용)
   setTimeout(() => {
     try {
-      const visible = getVisibleMeterIds();
-      fetchLatestStatus(visible);
+      fetchLatestStatus();
     } catch {}
   }, 350);
 
@@ -798,12 +848,16 @@ const runSearch = () => {
   // 같은 마커(같은 좌표)로 묶기 (좌표 없는 건 제외)
   const byKey = new Map();
   for (const r of matches) {
-    if (r?.lat == null || r?.lng == null) continue;
-    const key = `${r.lat},${r.lng}`;
+    const latN = Number(r?.lat);
+    const lngN = Number(r?.lng);
+    if (!Number.isFinite(latN) || !Number.isFinite(lngN)) continue;
+
+    const key = `${latN},${lngN}`;
     const prev = byKey.get(key);
-    if (!prev) byKey.set(key, { row: r, count: 1 });
+    if (!prev) byKey.set(key, { row: { ...r, lat: latN, lng: lngN }, count: 1 });
     else prev.count += 1;
   }
+
 
   const results = Array.from(byKey.values()).map((x) => ({
     key: `${x.row.lat},${x.row.lng}`,
@@ -1118,16 +1172,20 @@ const runSearch = () => {
       // 좌표 기준 그룹핑
       const uniqueGroupSet = new Set();
       for (const row of filteredForMap) {
-        const { address, lat, lng } = row;
-        if (!lat || !lng || !address) continue;
+        const address = row?.address;
+        const latN = Number(row?.lat);
+        const lngN = Number(row?.lng);
 
+        if (!address || !Number.isFinite(latN) || !Number.isFinite(lngN)) continue;
+        
         const cleanAddr = address.trim().replace(/\s+/g, " ");
-        const key = `${lat},${lng}`;
+        const key = `${latN},${lngN}`;
+        
         const uniqueKey = `${cleanAddr}_${row.meter_id}`;
         if (uniqueGroupSet.has(uniqueKey)) continue;
         uniqueGroupSet.add(uniqueKey);
 
-        if (!grouped[key]) grouped[key] = { coords: { lat, lng }, list: [] };
+        if (!grouped[key]) grouped[key] = { coords: { lat: latN, lng: lngN }, list: [] };
         grouped[key].list.push(row);
       }
 
@@ -1221,8 +1279,7 @@ const runSearch = () => {
         const openPopup = async (e) => {
           e.stopPropagation();
           // ✅ 어떤 마커를 클릭하든 "현재 화면 내 전체"를 최신화
-          const visibleIds = getVisibleMeterIds();
-          await fetchLatestStatus(visibleIds);
+          await fetchLatestStatus();
 
 
           const old = getActiveOverlay();
@@ -2568,6 +2625,95 @@ useEffect(() => {
   </div>
 )}
 
+      {/* 🧾 미좌표 목록 모달 */}
+{noCoordModalOpen && (
+  <div
+    style={{
+      position: "fixed",
+      inset: 0,
+      zIndex: 1000000,
+      background: "rgba(0,0,0,0.25)",
+      display: "flex",
+      justifyContent: "center",
+      alignItems: "flex-start",
+      paddingTop: 70,
+    }}
+    onClick={() => setNoCoordModalOpen(false)}
+  >
+    <div
+      style={{
+        width: isMobile ? "92vw" : "640px",
+        maxWidth: "640px",
+        background: "rgba(255,255,255,0.98)",
+        borderRadius: "14px",
+        boxShadow: "0 2px 12px rgba(0,0,0,0.22)",
+        border: "1px solid rgba(0,0,0,0.08)",
+        padding: "12px",
+      }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+        <div style={{ fontWeight: 900, fontSize: isMobile ? "16px" : "14px" }}>
+          미좌표 목록 ({noCoordRows.length})
+        </div>
+
+        <button
+          onClick={() => setNoCoordModalOpen(false)}
+          style={{
+            padding: isMobile ? "12px 12px" : "10px 12px",
+            borderRadius: "12px",
+            border: "1px solid #ddd",
+            background: "#fff",
+            cursor: "pointer",
+            fontWeight: 900,
+            fontSize: isMobile ? "14px" : "12px",
+            whiteSpace: "nowrap",
+          }}
+        >
+          닫기
+        </button>
+      </div>
+
+      <div style={{ marginTop: 10, fontSize: isMobile ? "13px" : "12px", color: "#666" }}>
+        (리스트번호 | 계기번호 | 주소)
+      </div>
+
+      <div
+        style={{
+          marginTop: 10,
+          maxHeight: isMobile ? "70vh" : "520px",
+          overflowY: "auto",
+          border: "1px solid rgba(0,0,0,0.08)",
+          borderRadius: "12px",
+          background: "white",
+        }}
+      >
+        {noCoordRows.length === 0 ? (
+          <div style={{ padding: "12px", color: "#666", fontSize: isMobile ? "14px" : "12px" }}>
+            미좌표 항목이 없습니다.
+          </div>
+        ) : (
+          noCoordRows.map((r, idx) => (
+            <div
+              key={`${normalizeMeterId(r?.meter_id)}_${idx}`}
+              style={{
+                padding: isMobile ? "12px 12px" : "10px 12px",
+                borderBottom: "1px solid rgba(0,0,0,0.06)",
+                fontSize: isMobile ? "14px" : "12px",
+                lineHeight: 1.35,
+                wordBreak: "break-word",
+              }}
+            >
+              {String(r?.list_no ?? "-")} | {String(r?.meter_id ?? "-")} | {String(r?.address ?? "-")}
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  </div>
+)}
+
+
 
       {/* 왼쪽 상단 상태 카운트 + 검색/필터 */}
 <div
@@ -2665,7 +2811,27 @@ useEffect(() => {
     </button>
 
     {/* 3번째 칸은 비워둠(원하면 여기다 다른 버튼/표시 추가 가능) */}
-    <div />
+    <button
+  onClick={() => {
+    setSearchPanelOpen(false);
+    setSearchOpen(false);
+    setFilterPanelOpen(false);
+    setNoCoordModalOpen(true);
+  }}
+  style={{
+    width: "100%",
+    padding: isMobile ? "10px 10px" : "7px 8px",
+    borderRadius: "10px",
+    border: "1px solid #ddd",
+    background: noCoordRows.length ? "#fff" : "#f8f9fa",
+    fontWeight: 900,
+    cursor: "pointer",
+    fontSize: isMobile ? "14px" : "12px",
+    whiteSpace: "nowrap",
+  }}
+>
+  미좌표 {noCoordRows.length}
+</button>
   </div>
 
   {/* ✅ 3행: 검색 / 필터 (2칸) */}
