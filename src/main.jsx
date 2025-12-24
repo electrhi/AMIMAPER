@@ -2417,7 +2417,7 @@ useEffect(() => {
 )}
 
       {/* ⚙️ 마커 개수 필터 패널(버튼 눌렀을 때만 표시) */}
-      {filterPanelOpen && (
+{filterPanelOpen && (
   <div
     style={{
       position: "fixed",
@@ -2441,8 +2441,7 @@ useEffect(() => {
         padding: "12px",
       }}
       onClick={(e) => e.stopPropagation()}
-      >
-      
+    >
       <div style={{ fontWeight: 900, fontSize: isMobile ? "16px" : "14px", marginBottom: 10 }}>
         마커 개수 필터
       </div>
@@ -2463,6 +2462,7 @@ useEffect(() => {
             boxSizing: "border-box",
           }}
         />
+
         <button
           onClick={() => {
             handleApplyFilter();
@@ -2482,6 +2482,7 @@ useEffect(() => {
         >
           적용
         </button>
+
         <button
           onClick={() => setFilterPanelOpen(false)}
           style={{
@@ -2504,79 +2505,70 @@ useEffect(() => {
       </div>
 
       <div style={{ marginTop: 14, borderTop: "1px solid rgba(0,0,0,0.08)", paddingTop: 12 }}>
-  <div style={{ fontWeight: 900, fontSize: isMobile ? "16px" : "14px", marginBottom: 8 }}>
-    계기 타입 필터
-  </div>
+        <div style={{ fontWeight: 900, fontSize: isMobile ? "16px" : "14px", marginBottom: 8 }}>
+          계기 타입 필터
+        </div>
 
-  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-    <button
-      onClick={() => setMeterTypeFilters([])} // [] = 전체
-      style={{
-        padding: isMobile ? "10px 10px" : "7px 8px",
-        borderRadius: "10px",
-        border: "1px solid #ddd",
-        background: meterTypeFilters.length === 0 ? "#f1f3f5" : "#fff",
-        fontWeight: 900,
-        cursor: "pointer",
-        fontSize: isMobile ? "13px" : "12px",
-      }}
-    >
-      전체
-    </button>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button
+            onClick={() => setMeterTypeFilters([])}
+            style={{
+              padding: isMobile ? "10px 10px" : "7px 8px",
+              borderRadius: "10px",
+              border: "1px solid #ddd",
+              background: meterTypeFilters.length === 0 ? "#f1f3f5" : "#fff",
+              fontWeight: 900,
+              cursor: "pointer",
+              fontSize: isMobile ? "13px" : "12px",
+            }}
+          >
+            전체
+          </button>
 
-    {availableMeterTypes.map((t) => {
-      const checked = meterTypeFilters.length === 0 || meterTypeFilters.includes(t);
+          {availableMeterTypes.map((t) => {
+            const checked = meterTypeFilters.length === 0 || meterTypeFilters.includes(t);
 
-      const toggle = () => {
-        setMeterTypeFilters((prev) => {
-          const base = prev.length === 0 ? [...availableMeterTypes] : [...prev];
-          const has = base.includes(t);
-          const next = has ? base.filter((x) => x !== t) : [...base, t];
-          // next가 []면 전체로 처리하려면 [] 유지(=전체 표시)
-          return next;
-        });
-      };
+            const toggle = () => {
+              setMeterTypeFilters((prev) => {
+                const base = prev.length === 0 ? [...availableMeterTypes] : [...prev];
+                const has = base.includes(t);
+                const next = has ? base.filter((x) => x !== t) : [...base, t];
+                return next;
+              });
+            };
 
-      return (
-        <label
-          key={t}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            cursor: "pointer",
-            userSelect: "none",
-            padding: isMobile ? "10px 10px" : "7px 8px",
-            borderRadius: "10px",
-            border: "1px solid rgba(0,0,0,0.08)",
-            background: checked ? "#f1f3f5" : "#fff",
-            fontWeight: 900,
-          }}
-        >
-          <input
-            type="checkbox"
-            checked={checked}
-            onChange={toggle}
-            style={{ width: 16, height: 16 }}
-          />
-          <span style={{ fontSize: isMobile ? "14px" : "12px" }}>{t}</span>
-        </label>
-      );
-    })}
-  </div>
+            return (
+              <label
+                key={t}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  cursor: "pointer",
+                  userSelect: "none",
+                  padding: isMobile ? "10px 10px" : "7px 8px",
+                  borderRadius: "10px",
+                  border: "1px solid rgba(0,0,0,0.08)",
+                  background: checked ? "#f1f3f5" : "#fff",
+                  fontWeight: 900,
+                }}
+              >
+                <input type="checkbox" checked={checked} onChange={toggle} style={{ width: 16, height: 16 }} />
+                <span style={{ fontSize: isMobile ? "14px" : "12px" }}>{t}</span>
+              </label>
+            );
+          })}
+        </div>
 
-  <div style={{ marginTop: 8, fontSize: isMobile ? "13px" : "12px", color: "#555" }}>
-    아무것도 선택 안 하면 전체 표시
-  </div>
-</div>
+        <div style={{ marginTop: 8, fontSize: isMobile ? "13px" : "12px", color: "#555" }}>
+          아무것도 선택 안 하면 전체 표시
+        </div>
       </div>
     </div>
   </div>
 )}
 
 
-
-      
       {/* 왼쪽 상단 상태 카운트 + 마커 개수 필터 */}
 
       <div
