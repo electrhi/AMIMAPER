@@ -129,11 +129,12 @@ const noCoordRows = React.useMemo(() => {
     const mid = normalizeMeterId(r?.meter_id);
     if (!mid) continue;
 
-    const latN = Number(r?.lat);
-    const lngN = Number(r?.lng);
+    const latN = parseFloat(r?.lat);
+    const lngN = parseFloat(r?.lng);
 
     // 좌표가 정상(finite)이면 제외
     if (Number.isFinite(latN) && Number.isFinite(lngN)) continue;
+
 
     // meter_id 중복 제거 (첫 1개만 유지)
     if (!latest.has(mid)) latest.set(mid, r);
@@ -573,8 +574,8 @@ rows.forEach((d) => {
 
     const visibleIds = [];
     for (const row of dataRef.current) {
-      const latN = Number(row?.lat);
-      const lngN = Number(row?.lng);
+      const latN = parseFloat(row?.lat);
+      const lngN = parseFloat(row?.lng);
       if (!Number.isFinite(latN) || !Number.isFinite(lngN)) continue;
 
       if (latN >= swLat && latN <= neLat && lngN >= swLng && lngN <= neLng) {
@@ -782,8 +783,9 @@ const getVisibleMeterIds = () => {
 
   const ids = [];
   for (const row of dataRef.current) {
-    const latN = Number(row?.lat);
-    const lngN = Number(row?.lng);
+    const latN = parseFloat(row?.lat);
+    const lngN = parseFloat(row?.lng);
+
     if (!Number.isFinite(latN) || !Number.isFinite(lngN)) continue;
 
     if (
@@ -1198,8 +1200,8 @@ const runSearch = () => {
       const uniqueGroupSet = new Set();
       for (const row of filteredForMap) {
         const address = row?.address;
-        const latN = Number(row?.lat);
-        const lngN = Number(row?.lng);
+        const latN = parseFloat(row?.lat);
+        const lngN = parseFloat(row?.lng);
 
         if (!address || !Number.isFinite(latN) || !Number.isFinite(lngN)) continue;
         
