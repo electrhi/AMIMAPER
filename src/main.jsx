@@ -261,6 +261,31 @@ useEffect(() => {
   dataRef.current = data;
 }, [data]);
 
+  // ✅ 디버그: data 안의 lat/lng가 null인데 Number()가 0으로 바뀌는지 확인 (1번만)
+useEffect(() => {
+  if (!data || data.length === 0) return;
+
+  // 너무 많이 찍히지 않게 1번만 찍기
+  if (window.__printed_latlng_debug) return;
+  window.__printed_latlng_debug = true;
+
+  console.log("========== [LAT/LNG DEBUG START] ==========");
+  console.log(
+    data.slice(0, 20).map((r) => ({
+      meter_id: r?.meter_id,
+      lat_raw: r?.lat,
+      lng_raw: r?.lng,
+      lat_number: Number(r?.lat),
+      lng_number: Number(r?.lng),
+      lat_isFinite: Number.isFinite(Number(r?.lat)),
+      lng_isFinite: Number.isFinite(Number(r?.lng)),
+    }))
+  );
+  console.log("TOTAL rows:", data.length);
+  console.log("========== [LAT/LNG DEBUG END] ==========");
+}, [data]);
+
+
 // ✅ status 변경으로 data가 바뀌어도 카운트는 항상 최신 유지 ✅✅✅
 useEffect(() => {
   const next = { 완료: 0, 불가: 0, 미방문: 0 };
