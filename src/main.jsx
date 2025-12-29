@@ -118,6 +118,17 @@ function App() {
   // ✅ 주소 라벨 ON/OFF
   const [showAddressLabels, setShowAddressLabels] = useState(true);
 
+  // ✅ 도로명 표시 토글 (화면 표시만)
+const [useRoadAddress, setUseRoadAddress] = useState(false);
+
+// ✅ 화면에 표시할 주소 결정 (도로명 우선 옵션)
+const pickAddress = (row) => {
+  const jibun = String(row?.address ?? "").trim();
+  const road = String(row?.road_address ?? "").trim();
+  return useRoadAddress && road ? road : jibun;
+};
+
+
   // ✅ 미좌표(좌표 없는) 목록 모달
 const [noCoordModalOpen, setNoCoordModalOpen] = useState(false);
 
@@ -484,6 +495,7 @@ const { data: chunkRows, error } = await supabase
       const baseData = json.map((r) => ({
         meter_id: normalizeMeterId(r["계기번호"]),
         address: r["주소"],
+        road_address: r["도로명주소"] || "", // ✅ 추가 (엑셀에 없으면 빈값)
         comm_type: r["통신방식"] || "", // 예: KS-PLC, LTE
         list_no: r["리스트번호"] || "", // 예: 5131, 5152
       }));
@@ -859,13 +871,17 @@ const runSearch = () => {
   for (const r of latestPerMeter.values()) {
     const listNo = String(r?.list_no ?? "").trim();
     const meter = normalizeMeterId(r?.meter_id);
-    const addr = String(r?.address ?? "").trim();
-    const addrNorm = addr.replace(/\s+/g, "").toLowerCase();
+    const addr1 = String(r?.address ?? "").trim();
+    const addr2 = String(r?.road_address ?? "").trim();
+
+    const addrNorm1 = addr1.replace(/\s+/g, "").toLowerCase();
+    const addrNorm2 = addr2.replace(/\s+/g, "").toLowerCase();
 
     const hit =
       (listNo && listNo.includes(qList)) ||
       (meter && qMeter && meter.includes(qMeter)) ||
-      (addrNorm && qAddr && addrNorm.includes(qAddr));
+      ((addrNorm1 && qAddr && addrNorm1.includes(qAddr)) ||
+       (addrNorm2 && qAddr && addrNorm2.includes(qAddr)));
 
     if (hit) matches.push(r);
   }
@@ -890,7 +906,7 @@ const runSearch = () => {
   key: `${x.row.lat},${x.row.lng}`,
   lat: x.row.lat,
   lng: x.row.lng,
-  address: x.row.address,
+  address: pickAddress(x.row), // ✅ 변경
   meter_id: x.row.meter_id,
   list_no: x.row.list_no,
   count: x.count,
@@ -920,7 +936,9 @@ const runSearch = () => {
   if (!map) return;
   requestFullRender.current();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusFilters, meterTypeFilters, showAddressLabels]);
+  }, [statusFilters, meterTypeFilters, showAddressLabels, useRoadAddress]);
+
+  
 
 
   // ✅ 검색 결과 바깥 클릭 시 닫기
@@ -1080,6 +1098,8 @@ const runSearch = () => {
           ...row,
           lat: parseFloat(exact[1].lat),
           lng: parseFloat(exact[1].lng),
+
+          road_address: exact[1].road_address || row.road_address || "", // ✅ 추가
         };
       }
 
@@ -1093,6 +1113,8 @@ const runSearch = () => {
           ...row,
           lat: parseFloat(partial[1].lat),
           lng: parseFloat(partial[1].lng),
+
+          road_address: partial[1].road_address || row.road_address || ""
         };
       }
 
@@ -1108,6 +1130,8 @@ const runSearch = () => {
           ...row,
           lat: parseFloat(similar[1].lat),
           lng: parseFloat(similar[1].lng),
+
+          road_address: similar[1].road_address || row.road_address || ""
         };
       }
 
@@ -1119,7 +1143,7 @@ const runSearch = () => {
         });
       }
 
-      return { ...row, lat: null, lng: null };
+      return { ...row, lat: null, lng: null, road_address: row.road_address || "" };
     });
 
     console.log(
@@ -1287,7 +1311,7 @@ const runSearch = () => {
           white-space: nowrap;
           transform: translateY(-4px);
         `;
-        labelEl.textContent = list[0].address; // 첫 번째 주소 사용
+        labelEl.textContent = pickAddress(list[0]); // ✅ 지번/도로명 토글 적용
 
         // ✅ 라벨은 클릭/터치 이벤트를 막고, 아래 마커가 클릭되게 하기
         labelEl.style.pointerEvents = "none";
@@ -1349,7 +1373,8 @@ const runSearch = () => {
           popupEl.appendChild(closeBtn);
 
           const title = document.createElement("b");
-          title.textContent = list[0].address;
+          title.textContent = pickAddress(list[0]); // ✅ 변경
+
           popupEl.appendChild(title);
           popupEl.appendChild(document.createElement("br"));
           popupEl.appendChild(document.createElement("br"));
@@ -1454,12 +1479,12 @@ const runSearch = () => {
     e.stopPropagation();
 
     if (text === "가기") {
-      const url = `https://map.kakao.com/link/to/${encodeURIComponent(
-        list[0].address
-      )},${coords.lat},${coords.lng}`;
+      const label = pickAddress(list[0]);
+      const url = `https://map.kakao.com/link/to/${encodeURIComponent(label)},${coords.lat},${coords.lng}`;
       window.open(url, "_blank");
       return;
     }
+
 
     await updateStatus(list.map((g) => g.meter_id), text, coords);
     await loadOtherUserLocations();
@@ -2805,21 +2830,22 @@ useEffect(() => {
     }}
   >
     <button
-      onClick={() => setStatusFilters([...STATUS_OPTIONS])}
+      onClick={() => setUseRoadAddress((v) => !v)}
       style={{
         width: "100%",
         padding: isMobile ? "10px 10px" : "7px 8px",
         borderRadius: "10px",
         border: "1px solid #ddd",
-        background: "#fff",
+        background: useRoadAddress ? "#f1f3f5" : "#fff",
         fontWeight: 900,
         cursor: "pointer",
         fontSize: isMobile ? "14px" : "12px",
         whiteSpace: "nowrap",
       }}
-    >
-      전체
+      >
+      {useRoadAddress ? "도로명" : "지번"}
     </button>
+
 
     <button
       onClick={() => setShowAddressLabels((v) => !v)}
