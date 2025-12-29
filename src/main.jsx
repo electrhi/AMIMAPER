@@ -803,9 +803,9 @@ const getVisibleMeterIds = () => {
   // ✅ 검색 결과로 이동
 const moveToSearchResult = async (item) => {
   if (!map || !window.kakao?.maps) return;
-
-  const lat = Number(item?.lat);
-  const lng = Number(item?.lng);
+  
+  const lat = parseFloat(item?.lat);
+  const lng = parseFloat(item?.lng);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
 
   const p = new window.kakao.maps.LatLng(lat, lng);
@@ -875,8 +875,8 @@ const runSearch = () => {
   // 같은 마커(같은 좌표)로 묶기 (좌표 없는 건 제외)
   const byKey = new Map();
   for (const r of matches) {
-    const latN = Number(r?.lat);
-    const lngN = Number(r?.lng);
+    const latN = parseFloat(r?.lat);
+    const lngN = parseFloat(r?.lng);
     if (!Number.isFinite(latN) || !Number.isFinite(lngN)) continue;
 
     const key = `${latN},${lngN}`;
@@ -887,14 +887,15 @@ const runSearch = () => {
 
 
   const results = Array.from(byKey.values()).map((x) => ({
-    key: `${x.row.lat},${x.row.lng}`,
-    lat: Number(x.row.lat),
-    lng: Number(x.row.lng),
-    address: x.row.address,
-    meter_id: x.row.meter_id,
-    list_no: x.row.list_no,
-    count: x.count,
-  }));
+  key: `${x.row.lat},${x.row.lng}`,
+  lat: x.row.lat,
+  lng: x.row.lng,
+  address: x.row.address,
+  meter_id: x.row.meter_id,
+  list_no: x.row.list_no,
+  count: x.count,
+}));
+
 
   results.sort((a, b) => b.count - a.count);
 
