@@ -2927,7 +2927,7 @@ useEffect(() => {
     const isBad = st === "불가";
 
     const baseBtn = {
-      padding: isMobile ? "10px 12px" : "8px 10px",
+      padding: isMobile ? "8px 10px" : "7px 9px",
       borderRadius: "10px",
       fontWeight: 900,
       cursor: "pointer",
