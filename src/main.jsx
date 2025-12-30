@@ -1940,7 +1940,7 @@ const openCustomMarkerEditor = (markerObj) => {
     const ov = new window.kakao.maps.CustomOverlay({
       position,
       content: box,
-      yAnchor: 1.8,
+      yAnchor: 1.35,
       zIndex: 999999,
     });
     ov.setMap(map);
@@ -2921,42 +2921,61 @@ useEffect(() => {
               </div>
 
               <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    updateStatusNoCoord(r?.meter_id, "완료");
-                  }}
-                  style={{
-                    padding: isMobile ? "10px 12px" : "8px 10px",
-                    borderRadius: "10px",
-                    border: "none",
-                    background: "green",
-                    color: "white",
-                    fontWeight: 900,
-                    cursor: "pointer",
-                  }}
-                >
-                  완
-                </button>
+  {(() => {
+    const st = String(r?.status || "미방문");
+    const isDone = st === "완료";
+    const isBad = st === "불가";
 
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    updateStatusNoCoord(r?.meter_id, "불가");
-                  }}
-                  style={{
-                    padding: isMobile ? "10px 12px" : "8px 10px",
-                    borderRadius: "10px",
-                    border: "none",
-                    background: "red",
-                    color: "white",
-                    fontWeight: 900,
-                    cursor: "pointer",
-                  }}
-                >
-                  불
-                </button>
-              </div>
+    const baseBtn = {
+      padding: isMobile ? "10px 12px" : "8px 10px",
+      borderRadius: "10px",
+      fontWeight: 900,
+      cursor: "pointer",
+      border: "1px solid rgba(0,0,0,0.18)",
+      background: "transparent",   // ✅ 기본 무색
+      color: "#111",               // ✅ 기본 검은 글씨
+    };
+
+    return (
+      <>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            updateStatusNoCoord(r?.meter_id, "완료");
+          }}
+          style={{
+            ...baseBtn,
+            background: isDone ? "green" : "transparent",
+            border: isDone ? "1px solid green" : baseBtn.border,
+            color: isDone ? "white" : "#111",
+            boxShadow: isDone ? "0 2px 6px rgba(0,0,0,0.18)" : "none",
+            opacity: isDone ? 0.95 : 1,
+          }}
+        >
+          완
+        </button>
+
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            updateStatusNoCoord(r?.meter_id, "불가");
+          }}
+          style={{
+            ...baseBtn,
+            background: isBad ? "red" : "transparent",
+            border: isBad ? "1px solid red" : baseBtn.border,
+            color: isBad ? "white" : "#111",
+            boxShadow: isBad ? "0 2px 6px rgba(0,0,0,0.18)" : "none",
+            opacity: isBad ? 0.95 : 1,
+          }}
+        >
+          불
+        </button>
+      </>
+    );
+  })()}
+</div>
+
             </div>
           ))
         )}
