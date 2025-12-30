@@ -51,6 +51,26 @@ const getMeterType = (meterId) => {
   return METER_MAPPING[mid] || "확인필요";
 };
 
+// ✅ uuid 생성 (DB uuid id 용)
+const genUUID = () => {
+  if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+
+  const getRand = () => {
+    if (window.crypto?.getRandomValues) {
+      const a = new Uint8Array(1);
+      window.crypto.getRandomValues(a);
+      return a[0] / 255;
+    }
+    return Math.random();
+  };
+
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (getRand() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+};
+
 
 // ✅ debounce (300~500ms 권장)
 const debounce = (fn, delay = 400) => {
@@ -232,6 +252,80 @@ const noCoordRows = React.useMemo(() => {
   // 임의 마커 데이터(로컬 저장)
   const [customMarkers, setCustomMarkers] = useState([]);
 
+    // ✅ 임의 마커 DB 동기화(실시간 X)
+  const customMarkersFetchSeqRef = useRef(0);
+  const lastCustomFetchAtRef = useRef(0);
+
+  const fetchCustomMarkersFromDB = async (force = false) => {
+    const dataFile = currentUser?.data_file;
+    if (!dataFile) return;
+
+    // 너무 자주 호출 방지(기존 최신화 흐름에 얹기)
+    const now = Date.now();
+    if (!force && now - lastCustomFetchAtRef.current < 1500) return;
+    lastCustomFetchAtRef.current = now;
+
+    const seq = ++customMarkersFetchSeqRef.current;
+
+    const { data: rows, error } = await supabase
+      .from("custom_markers")
+      .select("id,lat,lng,text,updated_at")
+      .eq("data_file", dataFile)
+      .order("updated_at", { ascending: true })
+      .limit(5000);
+
+    if (error) {
+      console.error("[ERROR][CUSTOM] fetch:", error.message);
+      return;
+    }
+    if (seq !== customMarkersFetchSeqRef.current) return;
+
+    setCustomMarkers(
+      (rows || []).map((r) => ({
+        id: r.id,
+        lat: Number(r.lat),
+        lng: Number(r.lng),
+        text: r.text || "",
+      }))
+    );
+  };
+
+  const upsertCustomMarkerToDB = async (m) => {
+    const dataFile = currentUser?.data_file;
+    if (!dataFile || !m?.id) return;
+
+    const payload = {
+      id: m.id,
+      data_file: dataFile,
+      lat: Number(m.lat),
+      lng: Number(m.lng),
+      text: m.text || "",
+      created_by: currentUser?.id || null,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { error } = await supabase
+      .from("custom_markers")
+      .upsert(payload)
+      .select("id");
+
+    if (error) throw error;
+  };
+
+  const deleteCustomMarkerFromDB = async (id) => {
+    const dataFile = currentUser?.data_file;
+    if (!dataFile || !id) return;
+
+    const { error } = await supabase
+      .from("custom_markers")
+      .delete()
+      .eq("data_file", dataFile)
+      .eq("id", id);
+
+    if (error) throw error;
+  };
+
+
   // 지도 위에 올려진 임의 마커 객체들 보관(삭제/재렌더용)
   const customMarkerObjsRef = useRef([]);
 
@@ -240,9 +334,6 @@ const noCoordRows = React.useMemo(() => {
 
   // 텍스트 입력 오버레이
   const customInputOverlayRef = useRef(null);
-
-  // 로컬스토리지 키(유저+엑셀별로 분리)
-  const CUSTOM_MARKERS_KEY = `amimap_custom_markers_${currentUser?.id || "anon"}_${currentUser?.data_file || "default"}`;
 
 
   // 예: 데이터 파일이 "djdemo.xlsx" 라면 geoCache 파일명은 "geoCache_djdemo.xlsx.json"
@@ -704,30 +795,6 @@ rows.forEach((d) => {
     loadGeoCache();
   }, [loggedIn, currentUser]);
 
-    // ✅ 임의 마커 로드
-  useEffect(() => {
-    if (!currentUser) return;
-    try {
-      const raw = localStorage.getItem(CUSTOM_MARKERS_KEY);
-      if (raw) setCustomMarkers(JSON.parse(raw));
-      else setCustomMarkers([]);
-    } catch (e) {
-      console.warn("[WARN][CUSTOM] 마커 로드 실패:", e?.message);
-      setCustomMarkers([]);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentUser?.id, currentUser?.data_file]);
-
-  // ✅ 임의 마커 저장
-  useEffect(() => {
-    if (!currentUser) return;
-    try {
-      localStorage.setItem(CUSTOM_MARKERS_KEY, JSON.stringify(customMarkers));
-    } catch (e) {
-      console.warn("[WARN][CUSTOM] 마커 저장 실패:", e?.message);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [customMarkers, currentUser?.id, currentUser?.data_file]);
 
 
   /** 주소 → 좌표 변환 (Python 캐시만 사용, Kakao 지오코딩 호출 X) **/
@@ -774,11 +841,15 @@ const fetchLatestStatus = async (meterIds = null) => {
 
     await fetchMetersStatusByIds(ids);
 
+    // ✅ 기존 최신화 타이밍에 임의 마커도 같이 최신화(실시간 X, 내부 throttling)
+    await fetchCustomMarkersFromDB(false);
+
     console.log("[DEBUG][SYNC] ✅ 최신 상태 반영 완료");
   } catch (err) {
     console.error("[ERROR][SYNC] 상태 갱신 실패:", err.message);
   }
 };
+
 
   // ✅ 현재 화면(bounds) 안에 있는 meter_id 전부 뽑기 (좌표 있는 것만)
 const getVisibleMeterIds = () => {
@@ -1601,6 +1672,15 @@ const runSearch = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map, customMarkers]);
 
+  // ✅ 지도 준비되면 1회 임의 마커 로드(같은 엑셀 사용자끼리 공유)
+useEffect(() => {
+  if (!map) return;
+  if (!currentUser?.data_file) return;
+  fetchCustomMarkersFromDB(true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [map, currentUser?.data_file]);
+
+
   const closeCustomInputOverlay = () => {
     if (customInputOverlayRef.current) {
       try { customInputOverlayRef.current.setMap(null); } catch {}
@@ -1700,21 +1780,32 @@ const openCustomMarkerEditor = (markerObj) => {
 
     const draft = customEditDraftRef.current || current;
     const nextText = (input.value || "").trim();
+    
+    const nextObj = { id, lat: draft.lat, lng: draft.lng, text: nextText };
 
-    // 저장(텍스트/위치)
+    // ✅ 화면 즉시 반영
     setCustomMarkers((prev) =>
       prev.map((m) =>
-        m.id === id
-          ? { ...m, text: nextText, lat: draft.lat, lng: draft.lng }
-          : m
-      )
-    );
+        m.id === id ? { ...m, text: nextText, lat: draft.lat, lng: draft.lng }: m
+              )
+                    );
+
+    // ✅ DB 반영(실시간 X) + 필요 시 강제 최신화
+    (async () => {
+      try {
+        await upsertCustomMarkerToDB(nextObj);
+        await fetchCustomMarkersFromDB(true);
+      } catch (err) {
+        console.error("[ERROR][CUSTOM] update:", err.message);
+      }
+    })();
 
     // 드래그 종료
     try { marker.setDraggable(false); } catch {}
 
     closeCustomEditOverlay();
   };
+
 
   row.appendChild(moveBtn);
   row.appendChild(saveBtn);
@@ -1727,10 +1818,26 @@ const openCustomMarkerEditor = (markerObj) => {
   delBtn.textContent = "삭제";
   delBtn.style.cssText = btnStyle + "background:#dc3545; color:white;";
   delBtn.onclick = (e) => {
-    e.stopPropagation();
-    closeCustomEditOverlay();
-    setCustomMarkers((prev) => prev.filter((m) => m.id !== id));
-  };
+  e.stopPropagation();
+
+  const targetId = id;
+
+  closeCustomEditOverlay();
+
+  // ✅ 화면 즉시 제거
+  setCustomMarkers((prev) => prev.filter((m) => m.id !== targetId));
+
+  // ✅ DB 삭제 + 필요 시 강제 최신화
+  (async () => {
+    try {
+      await deleteCustomMarkerFromDB(targetId);
+      await fetchCustomMarkersFromDB(true);
+    } catch (err) {
+      console.error("[ERROR][CUSTOM] delete:", err.message);
+    }
+  })();
+};
+
 
   const closeBtn = document.createElement("button");
   closeBtn.textContent = "닫기";
@@ -1908,18 +2015,29 @@ const openCustomMarkerEditor = (markerObj) => {
         marker.setDraggable(false);
 
         openCustomTextEditor(fixedPos, (text) => {
-          const lat = fixedPos.getLat();
-          const lng = fixedPos.getLng();
+  const lat = fixedPos.getLat();
+  const lng = fixedPos.getLng();
 
-          const id =
-            (window.crypto?.randomUUID && window.crypto.randomUUID()) ||
-            String(Date.now());
+  const id = genUUID();
 
-          setCustomMarkers((prev) => [...prev, { id, lat, lng, text }]);
+  const markerObj = { id, lat, lng, text };
 
-          // 임시 마커 제거(실제 마커는 renderCustomMarkers가 렌더)
-          cleanupDraftMarker();
-        });
+  // ✅ 낙관적 반영(바로 보이게)
+  setCustomMarkers((prev) => [...prev, markerObj]);
+
+  (async () => {
+    try {
+      await upsertCustomMarkerToDB(markerObj);
+      await fetchCustomMarkersFromDB(true); // 다른 사용자가 만든 것도 같이 최신화
+    } catch (e) {
+      console.error("[ERROR][CUSTOM] insert:", e.message);
+    } finally {
+      // 임시 마커 제거(실제 마커는 renderCustomMarkers가 렌더)
+      cleanupDraftMarker();
+    }
+  })();
+});
+
       });
     };
 
@@ -1930,6 +2048,43 @@ const openCustomMarkerEditor = (markerObj) => {
     };
   }, [map, isAddMarkerMode]);
 
+    // ✅ 미좌표(좌표 없는) 항목 상태 변경 전용: "완료/불가"만 처리
+  const updateStatusNoCoord = async (meterId, newStatus) => {
+    try {
+      if (!currentUser?.data_file) return;
+
+      const normId = normalizeMeterId(meterId);
+      const row =
+        dataRef.current.find((d) => normalizeMeterId(d.meter_id) === normId) || {};
+
+      const payload = {
+        data_file: currentUser.data_file,
+        meter_id: normId,
+        address: row.address || "",
+        status: newStatus,
+        user_id: currentUser.id,
+        lat: null,
+        lng: null,
+        updated_at: new Date().toISOString(),
+      };
+
+      const { error } = await supabase
+        .from("meters")
+        .upsert([payload], { onConflict: "data_file,meter_id,address" })
+        .select("meter_id");
+
+      if (error) throw error;
+
+      // ✅ 화면 즉시 반영
+      setData((prev) =>
+        prev.map((r) =>
+          normalizeMeterId(r.meter_id) === normId ? { ...r, status: newStatus } : r
+        )
+      );
+    } catch (e) {
+      console.error("[ERROR][NOCOORD STATUS] 저장 실패:", e.message);
+    }
+  };
 
   /** 상태 업데이트 (버튼 클릭 시만 DB 업로드) **/
   const updateStatus = async (meterIds, newStatus, coords) => {
@@ -2755,9 +2910,53 @@ useEffect(() => {
                 fontSize: isMobile ? "14px" : "12px",
                 lineHeight: 1.35,
                 wordBreak: "break-word",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 10,
               }}
             >
-              {String(r?.list_no ?? "-")} | {String(r?.meter_id ?? "-")} | {String(r?.address ?? "-")}
+              <div style={{ flex: 1 }}>
+                {String(r?.list_no ?? "-")} | {String(r?.meter_id ?? "-")} | {String(r?.address ?? "-")}
+              </div>
+
+              <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    updateStatusNoCoord(r?.meter_id, "완료");
+                  }}
+                  style={{
+                    padding: isMobile ? "10px 12px" : "8px 10px",
+                    borderRadius: "10px",
+                    border: "none",
+                    background: "green",
+                    color: "white",
+                    fontWeight: 900,
+                    cursor: "pointer",
+                  }}
+                >
+                  완
+                </button>
+
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    updateStatusNoCoord(r?.meter_id, "불가");
+                  }}
+                  style={{
+                    padding: isMobile ? "10px 12px" : "8px 10px",
+                    borderRadius: "10px",
+                    border: "none",
+                    background: "red",
+                    color: "white",
+                    fontWeight: 900,
+                    cursor: "pointer",
+                  }}
+                >
+                  불
+                </button>
+              </div>
             </div>
           ))
         )}
@@ -2765,6 +2964,8 @@ useEffect(() => {
     </div>
   </div>
 )}
+
+
 
 
 
