@@ -358,29 +358,28 @@ const clearSearchTemp = () => {
     try { searchTempRef.current.label?.setMap(null); } catch {} // ✅ 라벨 잠시 숨김
     // ✅ 임시마커 클릭 → “➕추가”랑 동일한 메모 모달 열기
     openCustomTextEditor(
-      pos,
-      (text) => {
-        const id = genUUID();
-        const markerObj = { id, lat: Number(lat), lng: Number(lng), text };
+  pos,
+  (text) => {
+    const id = genUUID();
+    const markerObj = { id, lat: Number(lat), lng: Number(lng), text };
 
-        // ✅ 화면 즉시 반영
-        setCustomMarkers((prev) => [...prev, markerObj]);
+    setCustomMarkers((prev) => [...prev, markerObj]);
 
-        // ✅ DB 저장 + 다른 사용자도 보이게 동기화(실시간 X)
-        (async () => {
-          try {
-            await upsertCustomMarkerToDB(markerObj);
-            await fetchCustomMarkersFromDB(true);
-          } catch (e) {
-            console.error("[ERROR][CUSTOM][FROM_SEARCH] insert:", e.message);
-          } finally {
-            // ✅ 임시 검색마커는 제거
-            clearSearchTemp();
-          }
-        })();
-      },
-      labelText || "" // ✅ 초기값(원하면 주소가 자동으로 들어감)
-    );
+    (async () => {
+      try {
+        await upsertCustomMarkerToDB(markerObj);
+        await fetchCustomMarkersFromDB(true);
+      } catch (e) {
+        console.error("[ERROR][CUSTOM][FROM_SEARCH] insert:", e.message);
+      } finally {
+        clearSearchTemp();
+      }
+    })();
+  },
+  labelText || "",
+  () => clearSearchTemp() // ✅ 삭제 누르면 검색 임시핀/라벨 제거
+);
+
   };
 
   // ✅ 임시 “마커” 클릭해도 추가 모달 뜨게
@@ -2023,8 +2022,8 @@ const openCustomMarkerEditor = (markerObj) => {
   setTimeout(() => input.focus(), 0);
 };
 
-  // ✅ (변경) initialText 파라미터 추가
-const openCustomTextEditor = (position, onSave, initialText = "") => {
+  // ✅ (변경) onDelete 파라미터 추가 + 삭제 버튼 추가
+const openCustomTextEditor = (position, onSave, initialText = "", onDelete = null) => {
   closeCustomInputOverlay();
 
   const box = document.createElement("div");
@@ -2046,7 +2045,7 @@ const openCustomTextEditor = (position, onSave, initialText = "") => {
   const input = document.createElement("input");
   input.type = "text";
   input.placeholder = "예: 누수 의심, 재방문 필요...";
-  input.value = initialText || ""; // ✅ 추가: 초기값
+  input.value = initialText || "";
   input.style.cssText = `
     width: 100%;
     padding: 7px 8px;
@@ -2075,6 +2074,25 @@ const openCustomTextEditor = (position, onSave, initialText = "") => {
     closeCustomInputOverlay();
   };
 
+  // ✅ 추가: 삭제 버튼
+  const deleteBtn = document.createElement("button");
+  deleteBtn.textContent = "삭제";
+  deleteBtn.style.cssText = `
+    padding: 6px 10px;
+    border-radius: 8px;
+    border: none;
+    background: #dc3545;
+    color: white;
+    cursor: pointer;
+    font-weight: 700;
+  `;
+  deleteBtn.onclick = (e) => {
+    e.stopPropagation();
+    // onDelete가 있으면 그걸 실행, 없으면 기본으로 입력창만 닫기
+    if (typeof onDelete === "function") onDelete();
+    closeCustomInputOverlay();
+  };
+
   const saveBtn = document.createElement("button");
   saveBtn.textContent = "저장";
   saveBtn.style.cssText = `
@@ -2094,6 +2112,7 @@ const openCustomTextEditor = (position, onSave, initialText = "") => {
   };
 
   btnRow.appendChild(cancelBtn);
+  btnRow.appendChild(deleteBtn); // ✅ 여기 추가됨
   btnRow.appendChild(saveBtn);
   box.appendChild(btnRow);
 
@@ -2108,6 +2127,7 @@ const openCustomTextEditor = (position, onSave, initialText = "") => {
 
   setTimeout(() => input.focus(), 0);
 };
+
 
 
   const cleanupDraftMarker = () => {
@@ -2148,66 +2168,67 @@ const openCustomTextEditor = (position, onSave, initialText = "") => {
     };
   }, [map, showAddressLabels]);
 
-    // ➕ 추가 모드: 지도 클릭 → 임시 마커 생성(드래그 가능), 마커 다시 클릭 → 고정 + 텍스트 입력
-  useEffect(() => {
-    if (!map || !window.kakao?.maps) return;
+  // ➕ 추가 모드: 지도 클릭 → 임시 마커 생성(드래그 가능), 마커 다시 클릭 → 고정 + 텍스트 입력
+useEffect(() => {
+  if (!map || !window.kakao?.maps) return;
 
-    const onMapClick = (mouseEvent) => {
-      if (!isAddMarkerMode) return;
+  const onMapClick = (mouseEvent) => {
+    if (!isAddMarkerMode) return;
 
-      // 이미 임시 마커가 있으면(드래그 중이면) 지도 클릭은 무시
-      if (draftMarkerRef.current) return;
+    // 이미 임시 마커가 있으면(드래그 중이면) 지도 클릭은 무시
+    if (draftMarkerRef.current) return;
 
-      const pos = mouseEvent.latLng;
+    const pos = mouseEvent.latLng;
 
-      const marker = new window.kakao.maps.Marker({
-        position: pos,
-        draggable: true,
-      });
-      marker.setMap(map);
-      
-      draftMarkerRef.current = marker;
-      
+    const marker = new window.kakao.maps.Marker({
+      position: pos,
+      draggable: true,
+    });
+    marker.setMap(map);
 
-      // “마커를 한번 더 누르면” → 고정 + 텍스트 입력
-      window.kakao.maps.event.addListener(marker, "click", () => {
-        const fixedPos = marker.getPosition();
+    draftMarkerRef.current = marker;
 
-        marker.setDraggable(false);
+    // “마커를 한번 더 누르면” → 고정 + 텍스트 입력
+    window.kakao.maps.event.addListener(marker, "click", () => {
+      const fixedPos = marker.getPosition();
+      marker.setDraggable(false);
 
-        openCustomTextEditor(fixedPos, (text) => {
-  const lat = fixedPos.getLat();
-  const lng = fixedPos.getLng();
+      openCustomTextEditor(
+        fixedPos,
+        (text) => {
+          const lat = fixedPos.getLat();
+          const lng = fixedPos.getLng();
 
-  const id = genUUID();
+          const id = genUUID();
+          const markerObj = { id, lat, lng, text };
 
-  const markerObj = { id, lat, lng, text };
+          // ✅ 화면 즉시 반영
+          setCustomMarkers((prev) => [...prev, markerObj]);
 
-  // ✅ 낙관적 반영(바로 보이게)
-  setCustomMarkers((prev) => [...prev, markerObj]);
+          (async () => {
+            try {
+              await upsertCustomMarkerToDB(markerObj);
+              await fetchCustomMarkersFromDB(true);
+            } catch (e) {
+              console.error("[ERROR][CUSTOM] insert:", e.message);
+            } finally {
+              cleanupDraftMarker(); // ✅ 임시 마커 제거
+            }
+          })();
+        },
+        "", // initialText
+        () => cleanupDraftMarker() // ✅ 삭제 누르면 임시 마커 제거
+      );
+    });
+  };
 
-  (async () => {
-    try {
-      await upsertCustomMarkerToDB(markerObj);
-      await fetchCustomMarkersFromDB(true); // 다른 사용자가 만든 것도 같이 최신화
-    } catch (e) {
-      console.error("[ERROR][CUSTOM] insert:", e.message);
-    } finally {
-      // 임시 마커 제거(실제 마커는 renderCustomMarkers가 렌더)
-      cleanupDraftMarker();
-    }
-  })();
-});
+  window.kakao.maps.event.addListener(map, "click", onMapClick);
 
-      });
-    };
+  return () => {
+    window.kakao.maps.event.removeListener(map, "click", onMapClick);
+  };
+}, [map, isAddMarkerMode]); // 기존 유지
 
-    window.kakao.maps.event.addListener(map, "click", onMapClick);
-
-    return () => {
-      window.kakao.maps.event.removeListener(map, "click", onMapClick);
-    };
-  }, [map, isAddMarkerMode]);
 
     // ✅ 미좌표(좌표 없는) 항목 상태 변경 전용: "완료/불가"만 처리
   const updateStatusNoCoord = async (meterId, newStatus) => {
@@ -3078,7 +3099,7 @@ useEffect(() => {
               }}
             >
               <div style={{ flex: 1 }}>
-                {String(r?.list_no ?? "-")} | {String(r?.meter_id ?? "-")} | {String(r?.address ?? "-")}
+                {String(r?.list_no ?? "-")} | {String(r?.meter_id ?? "-")} | {pickAddress(r) || "-"}
               </div>
 
               <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
