@@ -335,6 +335,58 @@ const noCoordRows = React.useMemo(() => {
   // 텍스트 입력 오버레이
   const customInputOverlayRef = useRef(null);
 
+  // ✅ "마커 없는 곳" 주소검색 결과 표시용 임시 마커/라벨
+const searchTempRef = useRef({ marker: null, label: null });
+
+const clearSearchTemp = () => {
+  try { searchTempRef.current.marker?.setMap(null); } catch {}
+  try { searchTempRef.current.label?.setMap(null); } catch {}
+  searchTempRef.current = { marker: null, label: null };
+};
+
+const showSearchTemp = (lat, lng, labelText = "") => {
+  if (!map || !window.kakao?.maps) return;
+
+  clearSearchTemp();
+
+  const pos = new window.kakao.maps.LatLng(lat, lng);
+
+  const marker = new window.kakao.maps.Marker({ position: pos });
+  marker.setMap(map);
+
+  const labelEl = document.createElement("div");
+  labelEl.style.cssText = `
+    background: rgba(255,255,255,0.95);
+    border: 1px solid #ddd;
+    border-radius: 10px;
+    padding: 6px 8px;
+    font-size: 12px;
+    font-weight: 800;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.18);
+    white-space: nowrap;
+    transform: translateY(-8px);
+    cursor: pointer;
+  `;
+  labelEl.textContent = labelText || "검색 위치";
+
+  labelEl.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const url = `https://map.kakao.com/link/to/${encodeURIComponent(labelText || "검색 위치")},${lat},${lng}`;
+    window.open(url, "_blank");
+  });
+
+  const label = new window.kakao.maps.CustomOverlay({
+    position: pos,
+    content: labelEl,
+    yAnchor: 2.3,
+    zIndex: 999999,
+  });
+  label.setMap(map);
+
+  searchTempRef.current = { marker, label };
+};
+
+
 
   // 예: 데이터 파일이 "djdemo.xlsx" 라면 geoCache 파일명은 "geoCache_djdemo.xlsx.json"
   const GEO_CACHE_FILE = `geoCache_${currentUser?.data_file || "default"}.json`;
@@ -883,17 +935,39 @@ const getVisibleMeterIds = () => {
   return Array.from(new Set(ids.map(normalizeMeterId))).filter(Boolean);
 };
 
+
   // ✅ 검색 결과로 이동
 const moveToSearchResult = async (item) => {
   if (!map || !window.kakao?.maps) return;
-  
+
   const lat = parseFloat(item?.lat);
   const lng = parseFloat(item?.lng);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
 
   const p = new window.kakao.maps.LatLng(lat, lng);
 
-  // 너무 멀리서 검색했을 때만 적당히 확대(기존 사용자 줌을 최대한 존중)
+  // ✅ geocode 결과(=마커 없는 주소검색)
+  if (item?.kind === "geocode") {
+    try {
+      const cur = map.getLevel();
+      if (cur > 5) map.setLevel(5);
+    } catch {}
+
+    map.panTo(p);
+
+    setSearchOpen(false);
+    setSearchPanelOpen(false);
+
+    // ✅ 임시 핀/라벨 표시
+    setTimeout(() => {
+      showSearchTemp(lat, lng, item.address || "검색 위치");
+    }, 150);
+
+    try { document.activeElement?.blur?.(); } catch {}
+    return;
+  }
+
+  // ✅ 기존(데이터 내 마커 검색) 로직
   try {
     const cur = map.getLevel();
     if (cur > 5) map.setLevel(5);
@@ -902,20 +976,63 @@ const moveToSearchResult = async (item) => {
   map.panTo(p);
 
   setSearchOpen(false);
-  setSearchPanelOpen(false); // ✅ 검색 결과 클릭 시 검색 패널도 같이 닫
+  setSearchPanelOpen(false);
 
-  // 이동 후 화면 내 최신 상태 동기화(기존 로직 재사용)
   setTimeout(() => {
-    try {
-      fetchLatestStatus();
-    } catch {}
+    try { fetchLatestStatus(); } catch {}
   }, 350);
 
-  // 모바일 키보드 닫기
-  try {
-    document.activeElement?.blur?.();
-  } catch {}
+  try { document.activeElement?.blur?.(); } catch {}
 };
+
+
+  // ✅ 데이터(마커) 검색 실패 시: 카카오 주소검색 fallback
+const searchAddressFallback = (qRaw) => {
+  const q = (qRaw || "").trim();
+  if (!q) return;
+
+  if (!window.kakao?.maps?.services) {
+    alert("주소 검색 서비스를 불러오지 못했습니다. (libraries=services 확인)");
+    return;
+  }
+
+  const geocoder = new window.kakao.maps.services.Geocoder();
+
+  geocoder.addressSearch(q, (res, status) => {
+    if (status !== window.kakao.maps.services.Status.OK || !res?.length) {
+      alert("검색 결과가 없습니다.");
+      setSearchOpen(false);
+      return;
+    }
+
+    const list = res.slice(0, 25).map((r, i) => {
+      const lat = parseFloat(r.y);
+      const lng = parseFloat(r.x);
+
+      const road = r.road_address?.address_name || "";
+      const jibun = r.address_name || "";
+      const title = road || jibun || q;
+
+      return {
+        kind: "geocode",
+        key: `geo_${r.x}_${r.y}_${i}`,
+        lat,
+        lng,
+        address: title,
+        address_sub: road ? jibun : "",
+        meter_id: "",
+        list_no: "",
+        count: 1,
+      };
+    });
+
+    setSearchResults(list);
+    setSearchOpen(true);
+
+    if (list.length === 1) moveToSearchResult(list[0]);
+  });
+};
+
 
 // ✅ 검색 실행
 const runSearch = () => {
@@ -995,10 +1112,18 @@ const runSearch = () => {
   }
 
   if (results.length === 0) {
-    if (matchedTotal > 0) alert("검색 결과는 있지만 좌표가 없어 이동할 수 없습니다.");
-    else alert("검색 결과가 없습니다.");
+  // 데이터엔 있지만 좌표가 없는 경우
+  if (matchedTotal > 0) {
+    alert("검색 결과는 있지만 좌표가 없어 이동할 수 없습니다.");
     setSearchOpen(false);
+    return;
   }
+
+  // ✅ 데이터/마커에 없으면 카카오 주소검색으로 이동
+  searchAddressFallback(qRaw);
+  return;
+  }
+
 };
 
 
