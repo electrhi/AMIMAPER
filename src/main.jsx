@@ -344,7 +344,7 @@ const clearSearchTemp = () => {
   searchTempRef.current = { marker: null, label: null };
 };
 
-const showSearchTemp = (lat, lng, labelText = "") => {
+  const showSearchTemp = (lat, lng, labelText = "") => {
   if (!map || !window.kakao?.maps) return;
 
   clearSearchTemp();
@@ -353,6 +353,40 @@ const showSearchTemp = (lat, lng, labelText = "") => {
 
   const marker = new window.kakao.maps.Marker({ position: pos });
   marker.setMap(map);
+
+  const openAddFromSearch = () => {
+    try { searchTempRef.current.label?.setMap(null); } catch {} // ✅ 라벨 잠시 숨김
+    // ✅ 임시마커 클릭 → “➕추가”랑 동일한 메모 모달 열기
+    openCustomTextEditor(
+      pos,
+      (text) => {
+        const id = genUUID();
+        const markerObj = { id, lat: Number(lat), lng: Number(lng), text };
+
+        // ✅ 화면 즉시 반영
+        setCustomMarkers((prev) => [...prev, markerObj]);
+
+        // ✅ DB 저장 + 다른 사용자도 보이게 동기화(실시간 X)
+        (async () => {
+          try {
+            await upsertCustomMarkerToDB(markerObj);
+            await fetchCustomMarkersFromDB(true);
+          } catch (e) {
+            console.error("[ERROR][CUSTOM][FROM_SEARCH] insert:", e.message);
+          } finally {
+            // ✅ 임시 검색마커는 제거
+            clearSearchTemp();
+          }
+        })();
+      },
+      labelText || "" // ✅ 초기값(원하면 주소가 자동으로 들어감)
+    );
+  };
+
+  // ✅ 임시 “마커” 클릭해도 추가 모달 뜨게
+  window.kakao.maps.event.addListener(marker, "click", () => {
+    openAddFromSearch();
+  });
 
   const labelEl = document.createElement("div");
   labelEl.style.cssText = `
@@ -369,10 +403,10 @@ const showSearchTemp = (lat, lng, labelText = "") => {
   `;
   labelEl.textContent = labelText || "검색 위치";
 
+  // ✅ 라벨 클릭도 동일하게 “추가 모달”
   labelEl.addEventListener("click", (e) => {
     e.stopPropagation();
-    const url = `https://map.kakao.com/link/to/${encodeURIComponent(labelText || "검색 위치")},${lat},${lng}`;
-    window.open(url, "_blank");
+    openAddFromSearch();
   });
 
   const label = new window.kakao.maps.CustomOverlay({
@@ -1989,90 +2023,92 @@ const openCustomMarkerEditor = (markerObj) => {
   setTimeout(() => input.focus(), 0);
 };
 
+  // ✅ (변경) initialText 파라미터 추가
+const openCustomTextEditor = (position, onSave, initialText = "") => {
+  closeCustomInputOverlay();
 
-  const openCustomTextEditor = (position, onSave) => {
+  const box = document.createElement("div");
+  box.style.cssText = `
+    background: white;
+    border: 1px solid #ccc;
+    border-radius: 10px;
+    padding: 8px;
+    width: 220px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+    font-size: 12px;
+  `;
+
+  const title = document.createElement("div");
+  title.textContent = "메모 입력";
+  title.style.cssText = "font-weight:700; margin-bottom:6px;";
+  box.appendChild(title);
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.placeholder = "예: 누수 의심, 재방문 필요...";
+  input.value = initialText || ""; // ✅ 추가: 초기값
+  input.style.cssText = `
+    width: 100%;
+    padding: 7px 8px;
+    border-radius: 8px;
+    border: 1px solid #ddd;
+    outline: none;
+    box-sizing: border-box;
+  `;
+  box.appendChild(input);
+
+  const btnRow = document.createElement("div");
+  btnRow.style.cssText =
+    "display:flex; gap:6px; margin-top:8px; justify-content:flex-end;";
+
+  const cancelBtn = document.createElement("button");
+  cancelBtn.textContent = "취소";
+  cancelBtn.style.cssText = `
+    padding: 6px 10px;
+    border-radius: 8px;
+    border: 1px solid #ddd;
+    background: #fff;
+    cursor: pointer;
+  `;
+  cancelBtn.onclick = (e) => {
+    e.stopPropagation();
     closeCustomInputOverlay();
-
-    const box = document.createElement("div");
-    box.style.cssText = `
-      background: white;
-      border: 1px solid #ccc;
-      border-radius: 10px;
-      padding: 8px;
-      width: 220px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-      font-size: 12px;
-    `;
-
-    const title = document.createElement("div");
-    title.textContent = "메모 입력";
-    title.style.cssText = "font-weight:700; margin-bottom:6px;";
-    box.appendChild(title);
-
-    const input = document.createElement("input");
-    input.type = "text";
-    input.placeholder = "예: 누수 의심, 재방문 필요...";
-    input.style.cssText = `
-      width: 100%;
-      padding: 7px 8px;
-      border-radius: 8px;
-      border: 1px solid #ddd;
-      outline: none;
-      box-sizing: border-box;
-    `;
-    box.appendChild(input);
-
-    const btnRow = document.createElement("div");
-    btnRow.style.cssText =
-      "display:flex; gap:6px; margin-top:8px; justify-content:flex-end;";
-
-    const cancelBtn = document.createElement("button");
-    cancelBtn.textContent = "취소";
-    cancelBtn.style.cssText = `
-      padding: 6px 10px;
-      border-radius: 8px;
-      border: 1px solid #ddd;
-      background: #fff;
-      cursor: pointer;
-    `;
-    cancelBtn.onclick = (e) => {
-      e.stopPropagation();
-      closeCustomInputOverlay();
-    };
-
-    const saveBtn = document.createElement("button");
-    saveBtn.textContent = "저장";
-    saveBtn.style.cssText = `
-      padding: 6px 10px;
-      border-radius: 8px;
-      border: none;
-      background: #007bff;
-      color: white;
-      cursor: pointer;
-      font-weight: 700;
-    `;
-    saveBtn.onclick = (e) => {
-      e.stopPropagation();
-      const text = (input.value || "").trim();
-      onSave(text);
-      closeCustomInputOverlay();
-    };
-
-    btnRow.appendChild(cancelBtn);
-    btnRow.appendChild(saveBtn);
-    box.appendChild(btnRow);
-
-    const ov = new window.kakao.maps.CustomOverlay({
-      position,
-      content: box,
-      yAnchor: 1.35,
-      zIndex: 999999,
-    });
-    ov.setMap(map);
-    customInputOverlayRef.current = ov;
-
-    setTimeout(() => input.focus(), 0);
   };
+
+  const saveBtn = document.createElement("button");
+  saveBtn.textContent = "저장";
+  saveBtn.style.cssText = `
+    padding: 6px 10px;
+    border-radius: 8px;
+    border: none;
+    background: #007bff;
+    color: white;
+    cursor: pointer;
+    font-weight: 700;
+  `;
+  saveBtn.onclick = (e) => {
+    e.stopPropagation();
+    const text = (input.value || "").trim();
+    onSave(text);
+    closeCustomInputOverlay();
+  };
+
+  btnRow.appendChild(cancelBtn);
+  btnRow.appendChild(saveBtn);
+  box.appendChild(btnRow);
+
+  const ov = new window.kakao.maps.CustomOverlay({
+    position,
+    content: box,
+    yAnchor: 1.35,
+    zIndex: 999999,
+  });
+  ov.setMap(map);
+  customInputOverlayRef.current = ov;
+
+  setTimeout(() => input.focus(), 0);
+};
+
 
   const cleanupDraftMarker = () => {
     if (draftMarkerRef.current) {
