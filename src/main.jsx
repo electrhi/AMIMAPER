@@ -1762,6 +1762,13 @@ const runSearch = () => {
               div.style.padding = on ? "2px 4px" : "2px 0";
             };
 
+              // ✅ 동일 마커 내 "오른쪽 2자리"가 중복이면 글자색 빨강
+            const suffix = normalizeMeterId(id).slice(-2);
+            if (suffix && suffixCount[suffix] > 1) {
+              div.style.color = "red";
+            }
+
+
             applySelectedStyle(false);
 
             div.addEventListener("click", (e) => {
