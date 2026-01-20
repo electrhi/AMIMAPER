@@ -671,10 +671,12 @@ const { data: chunkRows, error } = await supabase
       const baseData = json.map((r) => ({
         meter_id: normalizeMeterId(r["계기번호"]),
         address: r["주소"],
-        road_address: r["도로명주소"] || "", // ✅ 추가 (엑셀에 없으면 빈값)
-        comm_type: r["통신방식"] || "", // 예: KS-PLC, LTE
-        list_no: r["리스트번호"] || "", // 예: 5131, 5152
-      }));
+        road_address: r["도로명주소"] || "",
+        comm_type: r["통신방식"] || "",
+        list_no: r["리스트번호"] || "",
+        contract_type: r["계약종별"] || "",   // ✅ 추가: 농사/농사용 판별용
+        }));
+
 
       // ✅ 2) DB에서 최신 상태를 "엑셀에 있는 meter_id들만" 읽어오기 (전체 select(*) 금지)
 const excelIds = baseData.map((x) => normalizeMeterId(x.meter_id)).filter(Boolean);
@@ -1197,17 +1199,31 @@ const runSearch = () => {
     return R * c; // 미터 단위로 반환
   };
 
-    // ✅ status -> 색
-  const statusToColor = (s) =>
-    s === "완료" ? "green" : s === "불가" ? "red" : "blue";
+    // ✅ 계약종별이 농사/농사용인지 판별
+  const isFarmingContract = (v) => {
+    const s = String(v ?? "").replace(/\s+/g, "").trim(); // 공백 제거
+    return s === "농사" || s === "농사용";
+  };
 
-  // ✅ overlay 색상만 변경
+  // ✅ 상태 + 농사 포함 여부 -> 마커 색
+  const FARMING_YELLOW = "#f1c40f"; // 노란색(원하면 바꿔도 됨)
+  const getMarkerColor = (status, hasFarming) => {
+    if (status === "완료") return "green";
+    if (status === "불가") return "red";
+    // 미방문
+    return hasFarming ? FARMING_YELLOW : "blue";
+  };
+  
+  // ✅ overlay 색상만 변경 (농사 미방문은 노란색)
   const setOverlayColor = (overlay, status) => {
     const el = overlay?.getContent?.();
     if (!el) return;
-    el.style.background = statusToColor(status);
+    
+    const hasFarming = !!overlay.__hasFarming; // ✅ 마커 생성 시 저장한 값 사용
+    el.style.background = getMarkerColor(status, hasFarming);
     el.style.transition = "background 0.3s ease";
   };
+
 
   // ✅ (추가) meterIds가 속한 마커들만 찾아서 색만 업데이트
   const updateMarkerColorsByMeterIds = (meterIds, latestMap = null) => {
@@ -1272,12 +1288,8 @@ const runSearch = () => {
       const el = overlay.getContent();
       if (!el) return;
 
-      const color =
-        newStatus === "완료"
-          ? "green"
-          : newStatus === "불가"
-          ? "red"
-          : "blue";
+      const hasFarming = !!overlay.__hasFarming;
+      const color = getMarkerColor(newStatus, hasFarming);
 
       el.style.background = color;
       el.style.transition = "background 0.3s ease";
@@ -1479,15 +1491,18 @@ const runSearch = () => {
         if (useSizeFilter && list.length < threshold) {
           return;
         }
-
+        
         const 진행 = list[0].status;
-        const color =
-          진행 === "완료" ? "green" : 진행 === "불가" ? "red" : "blue";
-
+        
+        // ✅ 이 좌표 그룹에 농사/농사용이 하나라도 있으면 true
+        const hasFarming = list.some((r) => isFarmingContract(r?.contract_type));
+        
+        const color = getMarkerColor(진행, hasFarming);
         const kakaoCoord = new window.kakao.maps.LatLng(
           coords.lat,
           coords.lng
         );
+
 
         const markerEl = document.createElement("div");
         markerEl.style.cssText = `
@@ -1500,20 +1515,23 @@ const runSearch = () => {
           cursor:pointer;
         `;
         markerEl.textContent = list.length;
+        
+        
+        const overlay = new window.kakao.maps.CustomOverlay({
+          position: kakaoCoord,
+          content: markerEl,
+          yAnchor: 1,
+        });
 
-      const overlay = new window.kakao.maps.CustomOverlay({
-        position: kakaoCoord,
-        content: markerEl,
-        yAnchor: 1,
-      });
-
-        // ✅ Partial 업데이트용 좌표 박아두기 (무조건 숫자로 고정)
         overlay.__lat = Number(coords.lat);
         overlay.__lng = Number(coords.lng);
 
-        // ✅ (추가) 이 마커가 어떤 계기들을 포함하는지 저장 + 인덱스 등록
         overlay.__key = key;
         overlay.__meterIds = list.map((r) => normalizeMeterId(r.meter_id));
+
+        // ✅ 추가: 농사 포함 여부 저장(색 업데이트에도 필요)
+        overlay.__hasFarming = hasFarming;
+
 
         overlayByKeyRef.current.set(key, overlay);
         for (const r of list) {
@@ -3123,7 +3141,8 @@ useEffect(() => {
         <button
           onClick={(e) => {
             e.stopPropagation();
-            updateStatusNoCoord(r?.meter_id, "완료");
+            const st = String(r?.status || "미방문");
+            updateStatusNoCoord(r?.meter_id, st === "완료" ? "미방문" : "완료");
           }}
           style={{
             ...baseBtn,
@@ -3140,7 +3159,8 @@ useEffect(() => {
         <button
           onClick={(e) => {
             e.stopPropagation();
-            updateStatusNoCoord(r?.meter_id, "불가");
+            const st = String(r?.status || "미방문");
+            updateStatusNoCoord(r?.meter_id, st === "불가" ? "미방문" : "불가");
           }}
           style={{
             ...baseBtn,
