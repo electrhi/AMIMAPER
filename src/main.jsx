@@ -430,12 +430,17 @@ const clearSearchTemp = () => {
   // ✅ (추가) "좌표/그룹"이 바뀌는 순간만 +1 (status 변경은 제외)
   const [layoutVersion, setLayoutVersion] = useState(0);
 
-  // ✅ (추가) 좌표Key -> overlay, meter_id -> 좌표Key
+    // ✅ (추가) 좌표Key -> overlay, meter_id -> 좌표Key
   const overlayByKeyRef = useRef(new Map());
   const meterToKeyRef = useRef(new Map());
 
+  // ✅ (추가) 좌표Key -> 건물명 캐시 / 라벨 DOM 저장(건물명 조회 후 라벨 갱신용)
+  const buildingNameCacheRef = useRef(new Map()); // key("lat,lng") -> "건물명"
+  const labelByKeyRef = useRef(new Map());        // key -> { el, overlay }
+
   // ✅ (추가) 전체 렌더를 디바운스로 요청하기 위한 장치
   const renderMarkersRefFn = useRef(null);
+
   const requestFullRender = useRef(
     debounce(() => {
       renderMarkersRefFn.current?.();
@@ -672,10 +677,12 @@ const { data: chunkRows, error } = await supabase
         meter_id: normalizeMeterId(r["계기번호"]),
         address: r["주소"],
         road_address: r["도로명주소"] || "",
+        building_name: r["건물명"] || "",          // ✅ 추가 (Python이 만든 엑셀 컬럼)
         comm_type: r["통신방식"] || "",
         list_no: r["리스트번호"] || "",
-        contract_type: r["계약종별"] || "",   // ✅ 추가: 농사/농사용 판별용
-        }));
+        contract_type: r["계약종별"] || "",
+      }));
+
 
 
       // ✅ 2) DB에서 최신 상태를 "엑셀에 있는 meter_id들만" 읽어오기 (전체 select(*) 금지)
@@ -1198,6 +1205,29 @@ const runSearch = () => {
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return R * c; // 미터 단위로 반환
   };
+  
+  // ✅ 좌표 -> 건물명(아파트/빌라/상가/주택명 등) 가져오기
+  const fetchBuildingNameByCoords = (lat, lng) => {
+    return new Promise((resolve) => {
+      try {
+        if (!window.kakao?.maps?.services) return resolve("");
+        
+        const geocoder = new window.kakao.maps.services.Geocoder();
+
+        // ⚠️ Kakao는 (lng, lat) 순서
+        geocoder.coord2Address(lng, lat, (res, status) => {
+          if (status !== window.kakao.maps.services.Status.OK || !res?.length) {
+            return resolve("");
+          }
+          const road = res[0]?.road_address;
+          const bname = String(road?.building_name || "").trim();
+          resolve(bname);
+        });
+      } catch {
+        resolve("");
+      }
+    });
+  };
 
     // ✅ 계약종별이 농사/농사용인지 판별
   const isFarmingContract = (v) => {
@@ -1341,6 +1371,7 @@ const runSearch = () => {
           lng: parseFloat(exact[1].lng),
 
           road_address: exact[1].road_address || row.road_address || "", // ✅ 추가
+          building_name: exact[1].building_name || row.building_name || "", // ✅ 추가
         };
       }
 
@@ -1355,7 +1386,8 @@ const runSearch = () => {
           lat: parseFloat(partial[1].lat),
           lng: parseFloat(partial[1].lng),
 
-          road_address: partial[1].road_address || row.road_address || ""
+          road_address: partial[1].road_address || row.road_address || "",
+          building_name: partial[1].building_name || row.building_name || "",
         };
       }
 
@@ -1372,7 +1404,8 @@ const runSearch = () => {
           lat: parseFloat(similar[1].lat),
           lng: parseFloat(similar[1].lng),
 
-          road_address: similar[1].road_address || row.road_address || ""
+          road_address: similar[1].road_address || row.road_address || "",
+          building_name: similar[1].building_name || row.building_name || "",
         };
       }
 
@@ -1384,7 +1417,8 @@ const runSearch = () => {
         });
       }
 
-      return { ...row, lat: null, lng: null, road_address: row.road_address || "" };
+      return { ...row, lat: null, lng: null, road_address: row.road_address || "", building_name: row.building_name || "" };
+      
     });
 
     console.log(
@@ -1432,6 +1466,7 @@ const runSearch = () => {
       // ✅ (추가) 인덱스 초기화
       overlayByKeyRef.current.clear();
       meterToKeyRef.current.clear();
+      labelByKeyRef.current.clear(); // ✅ 추가
 
       // 🔹 기존 주소 라벨 제거
       addressOverlaysRef.current.forEach((ov) => ov.setMap(null));
@@ -1548,6 +1583,7 @@ const runSearch = () => {
         const showLabel = showAddressLabels && currentLevel <= LABEL_SHOW_LEVEL;
 
         // 🔹 주소 라벨용 엘리먼트
+        
         const labelEl = document.createElement("div");
         labelEl.style.cssText = `
           background: rgba(255,255,255,0.9);
@@ -1558,10 +1594,26 @@ const runSearch = () => {
           white-space: nowrap;
           transform: translateY(-4px);
         `;
-        labelEl.textContent = pickAddress(list[0]); // ✅ 지번/도로명 토글 적용
+
+        // ✅ 캐시된 건물명이 있으면 라벨에 같이 표시
+        const fromRowB = String(list[0]?.building_name || "").trim();
+        let cachedB = String(buildingNameCacheRef.current.get(key) || "").trim();
+
+        // ✅ row에 건물명이 있으면 캐시에 저장(클릭 조회 없이 바로 표시)
+        if (!cachedB && fromRowB) {
+          cachedB = fromRowB;
+          buildingNameCacheRef.current.set(key, cachedB);
+        }
+        
+        labelEl.textContent =
+          cachedB && cachedB !== "__NONE__"
+          ? `${pickAddress(list[0])} (${cachedB})`
+          : pickAddress(list[0]);
+
 
         // ✅ 라벨은 클릭/터치 이벤트를 막고, 아래 마커가 클릭되게 하기
         labelEl.style.pointerEvents = "none";
+
 
         const labelOverlay = new window.kakao.maps.CustomOverlay({
           position: kakaoCoord,
@@ -1573,6 +1625,9 @@ const runSearch = () => {
         // 🔹 레벨 조건에 따라 처음 렌더 시 보이거나 숨기기
         labelOverlay.setMap(showLabel ? map : null);
         addressOverlaysRef.current.push(labelOverlay);
+
+        // ✅ 나중에 건물명 조회되면 라벨을 갱신하기 위해 저장
+        labelByKeyRef.current.set(key, { el: labelEl, overlay: labelOverlay });
 
         // 마커 클릭 시 팝업 + 상태 버튼
         const openPopup = async (e) => {
@@ -1619,12 +1674,52 @@ const runSearch = () => {
           });
           popupEl.appendChild(closeBtn);
 
-          const title = document.createElement("b");
-          title.textContent = pickAddress(list[0]); // ✅ 변경
+                    const title = document.createElement("b");
+          title.textContent = pickAddress(list[0]);
 
           popupEl.appendChild(title);
           popupEl.appendChild(document.createElement("br"));
+
+          // ✅ 건물명 표시 줄
+          const buildingLine = document.createElement("div");
+          buildingLine.style.cssText = "margin-top:4px; color:#444; font-weight:800;";
+
+          const fromRowB = String(list[0]?.building_name || "").trim();
+          let cachedB = String(buildingNameCacheRef.current.get(key) || "").trim();
+
+          // row에 건물명이 있으면 캐시에 저장
+          if ((!cachedB || cachedB === "__NONE__") && fromRowB) {
+            cachedB = fromRowB;
+            buildingNameCacheRef.current.set(key, cachedB);
+          }
+
+          buildingLine.textContent =
+            cachedB && cachedB !== "__NONE__" ? `🏢 ${cachedB}` : "";
+
+          popupEl.appendChild(buildingLine);
           popupEl.appendChild(document.createElement("br"));
+
+          // ✅ 여전히 없으면(coord2Address로 보조 조회) — 그리고 실패도 캐시해서 “매번 조회” 방지
+          if (!cachedB || cachedB === "__NONE__") {
+            (async () => {
+              const bn = await fetchBuildingNameByCoords(Number(coords.lat), Number(coords.lng));
+
+              if (!bn) {
+                buildingNameCacheRef.current.set(key, "__NONE__"); // ✅ 못찾음도 캐시
+                return;
+              }
+
+              buildingNameCacheRef.current.set(key, bn);
+              buildingLine.textContent = `🏢 ${bn}`;
+
+              const lbl = labelByKeyRef.current.get(key);
+              if (lbl?.el) {
+                lbl.el.textContent = `${pickAddress(list[0])} (${bn})`;
+              }
+            })();
+          }
+
+          
 
           // 하나의 마커에 포함된 모든 계기번호 (문자열로 정규화)
           const allIds = list.map((g) => String(g.meter_id || ""));
@@ -1657,41 +1752,36 @@ const runSearch = () => {
             // 기본 스타일
             div.style.padding = "2px 0";
             div.style.cursor = "pointer";
+            div.style.userSelect = "none";
             div.title = "클릭 시 계기번호 복사";
+            div.dataset.selected = "0";
 
-            // ✅ 뒤 2자리가 같은 계기번호들만 빨간색 처리
-            const suffix = id.slice(-2);
-            if (suffix && suffixCount[suffix] > 1) {
-              div.style.color = "red";
-            }
+            const applySelectedStyle = (on) => {
+              div.style.backgroundColor = on ? "#fff3bf" : "transparent"; // 옅은 노랑
+              div.style.borderRadius = on ? "6px" : "0px";
+              div.style.padding = on ? "2px 4px" : "2px 0";
+            };
 
-            // ✅ 클릭 시 계기번호 클립보드 복사
+            applySelectedStyle(false);
+
             div.addEventListener("click", (e) => {
-              e.stopPropagation(); // 팝업/마커 클릭 이벤트로 안 올라가게
+              e.stopPropagation();
 
+              // ✅ 1) 토글
+              const nextOn = div.dataset.selected !== "1";
+              div.dataset.selected = nextOn ? "1" : "0";
+              applySelectedStyle(nextOn);
+
+              // ✅ 2) 복사
               const meterIdToCopy = id;
 
               if (navigator.clipboard && navigator.clipboard.writeText) {
-                navigator.clipboard
-                  .writeText(meterIdToCopy)
-                  .then(() => {
-                    // 살짝 하이라이트 효과
-                    const oldBg = div.style.backgroundColor;
-                    div.style.backgroundColor = "#f0f8ff";
-                    setTimeout(() => {
-                      div.style.backgroundColor = oldBg;
-                    }, 200);
-                    console.log(
-                      "[DEBUG][COPY] 계기번호 복사 완료:",
-                      meterIdToCopy
-                    );
-                  })
-                  .catch((err) => {
-                    console.warn("[DEBUG][COPY] 클립보드 복사 실패:", err);
-                    alert("복사에 실패했습니다. 다시 시도해주세요.");
-                  });
+                navigator.clipboard.writeText(meterIdToCopy).catch((err) => {
+                  console.warn("[DEBUG][COPY] 실패:", err);
+                  alert("복사에 실패했습니다. 다시 시도해주세요.");
+                });
+                
               } else {
-                // 구형 브라우저 대응 (거의 안 쓸 가능성 높지만 백업용)
                 const textarea = document.createElement("textarea");
                 textarea.value = meterIdToCopy;
                 textarea.style.position = "fixed";
@@ -1701,16 +1791,14 @@ const runSearch = () => {
                 textarea.select();
                 try {
                   document.execCommand("copy");
-                  console.log(
-                    "[DEBUG][COPY] execCommand 로 계기번호 복사:",
-                    meterIdToCopy
-                  );
                 } catch (err) {
                   alert("복사에 실패했습니다. 직접 복사해주세요.");
                 }
                 document.body.removeChild(textarea);
               }
             });
+
+
 
             popupEl.appendChild(div);
           });
