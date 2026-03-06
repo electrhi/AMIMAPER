@@ -2551,13 +2551,36 @@ console.log("[DEBUG][STATUS] 🔁 전체 지도 최신화 완료");
  *  - 관리자(isAdmin): data_file 무시하고 전체 유저의 "마지막 위치"만 표시
  *  - (user_last_locations에 data_file별로 행이 여러개 있을 수 있으니 user_id별 최신 1개로 압축)
  */
-const loadOtherUserLocations = async () => {
+
+  const loadOtherUserLocations = async () => {
   if (!map) return;
   if (!isAdmin) return;
 
   otherUserOverlays.current.forEach((ov) => ov.setMap(null));
   otherUserOverlays.current = [];
 
+  // 1) users 테이블에서 data_file 이 비어있지 않은 사용자만 추림
+  const { data: userRows, error: userError } = await supabase
+    .from("users")
+    .select("id,data_file");
+
+  if (userError) {
+    console.error("[ERROR][OTHERS] users:", userError.message);
+    return;
+  }
+
+  const allowedUserIds = new Set(
+    (userRows || [])
+      .filter((u) => {
+        const df = String(u?.data_file ?? "").trim();
+        return df !== "" && df.toUpperCase() !== "EMPTY";
+      })
+      .map((u) => String(u.id))
+  );
+
+  console.log("[DEBUG][OTHERS] allowed users:", allowedUserIds.size);
+
+  // 2) 마지막 위치 조회
   const { data: rows, error } = await supabase
     .from("user_last_locations")
     .select("user_id,data_file,address,lat,lng,status,updated_at")
@@ -2574,9 +2597,13 @@ const loadOtherUserLocations = async () => {
 
   const latestByUser = new Map();
   for (const loc of rows || []) {
-    if (!loc?.user_id) continue;
+    const uid = String(loc?.user_id ?? "").trim();
+
+    if (!uid) continue;
+    if (!allowedUserIds.has(uid)) continue; // ✅ users.data_file 비어있는 사용자 제외
     if (loc.lat == null || loc.lng == null) continue;
-    if (!latestByUser.has(loc.user_id)) latestByUser.set(loc.user_id, loc);
+
+    if (!latestByUser.has(uid)) latestByUser.set(uid, loc);
   }
 
   for (const loc of latestByUser.values()) {
@@ -2595,7 +2622,7 @@ const loadOtherUserLocations = async () => {
       cursor:pointer;
     `;
 
-    markerEl.textContent = loc.user_id; // ✅ 빠져있던 핵심
+    markerEl.textContent = loc.user_id;
     markerEl.title = loc.data_file ? `파일: ${loc.data_file}` : "";
 
     markerEl.addEventListener("click", (e) => {
