@@ -2615,9 +2615,20 @@ console.log("[DEBUG][STATUS] 🔁 전체 지도 최신화 완료");
 
     markerEl.addEventListener("click", (e) => {
       e.stopPropagation();
-      const label = loc.address || loc.user_id;
-      const url = `https://map.kakao.com/link/to/${encodeURIComponent(label)},${loc.lat},${loc.lng}`;
-      window.location.href = url;
+      
+      const lat = Number(loc.lat);
+      const lng = Number(loc.lng);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+      const target = new window.kakao.maps.LatLng(lat, lng);
+
+      // 너무 멀리 축소되어 있으면 적당히 확대
+      try {
+        const curLevel = map.getLevel();
+        if (curLevel > 4) map.setLevel(4);
+      } catch {}
+      
+      map.panTo(target);
     });
 
     const overlay = new window.kakao.maps.CustomOverlay({
