@@ -1820,12 +1820,78 @@ const runSearch = () => {
   btn.addEventListener("click", async (e) => {
     e.stopPropagation();
 
+
     if (text === "가기") {
-      const label = pickAddress(list[0]);
-      const url = `https://map.kakao.com/link/to/${encodeURIComponent(label)},${coords.lat},${coords.lng}`;
-      window.open(url, "_blank");
-      return;
+  const destLabel = pickAddress(list[0]) || "목적지";
+  const destLat = Number(coords.lat);
+  const destLng = Number(coords.lng);
+
+  if (!Number.isFinite(destLat) || !Number.isFinite(destLng)) {
+    alert("목적지 좌표가 올바르지 않습니다.");
+    return;
+  }
+
+  const openFallbackMap = () => {
+    const mapUrl = `https://map.kakao.com/link/map/${encodeURIComponent(destLabel)},${destLat},${destLng}`;
+    window.location.href = mapUrl;
+  };
+
+  if (!navigator.geolocation) {
+    openFallbackMap();
+    return;
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      const curLat = Number(pos.coords.latitude);
+      const curLng = Number(pos.coords.longitude);
+
+      if (!Number.isFinite(curLat) || !Number.isFinite(curLng)) {
+        openFallbackMap();
+        return;
+      }
+
+      const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || "");
+
+      const webRouteUrl =
+        `https://map.kakao.com/link/from/${encodeURIComponent("현재위치")},${curLat},${curLng}` +
+        `/to/${encodeURIComponent(destLabel)},${destLat},${destLng}`;
+
+      const appRouteUrl =
+        `kakaomap://route?sp=${curLat},${curLng}&ep=${destLat},${destLng}&by=car`;
+
+      const mobileWebSchemeUrl =
+        `https://m.map.kakao.com/scheme/route?sp=${curLat},${curLng}&ep=${destLat},${destLng}&by=car`;
+
+      if (isMobile) {
+        // 1순위: 카카오맵 앱 스킴
+        window.location.href = appRouteUrl;
+
+        // 2순위: 모바일 웹 스킴
+        setTimeout(() => {
+          window.location.href = mobileWebSchemeUrl;
+        }, 800);
+
+        // 3순위: 일반 웹 길찾기
+        setTimeout(() => {
+          window.location.href = webRouteUrl;
+        }, 1600);
+      } else {
+        window.open(webRouteUrl, "_blank", "noopener,noreferrer");
+      }
+    },
+    () => {
+      openFallbackMap();
+    },
+    {
+      enableHighAccuracy: true,
+      timeout: 5000,
+      maximumAge: 10000,
     }
+  );
+
+  return;
+}
 
 
     await updateStatus(list.map((g) => g.meter_id), text, coords);
@@ -2536,7 +2602,7 @@ const loadOtherUserLocations = async () => {
       e.stopPropagation();
       const label = loc.address || loc.user_id;
       const url = `https://map.kakao.com/link/to/${encodeURIComponent(label)},${loc.lat},${loc.lng}`;
-      window.open(url, "_blank");
+      window.location.href = url;
     });
 
     const overlay = new window.kakao.maps.CustomOverlay({
