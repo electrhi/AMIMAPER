@@ -753,12 +753,12 @@ rows.forEach((d) => {
     document.head.appendChild(script);
   }, [loggedIn]);
 
- useEffect(() => {
+  useEffect(() => {
   if (!map || !window.kakao?.maps) return;
-  if (!currentUser?.data_file) return; // ✅ 추가: data_file 없으면 동기화하지 않음
+  if (!currentUser?.data_file) return;
 
-  const syncInView = async () => {
-    console.count("[DEBUG][FETCH] sync in view");
+  const syncInViewOnce = async () => {
+    console.count("[DEBUG][FETCH] initial sync in view");
 
     const b = map.getBounds();
     const sw = b.getSouthWest();
@@ -781,24 +781,12 @@ rows.forEach((d) => {
     }
 
     await fetchLatestStatus(visibleIds);
-
   };
 
-  const debounced = debounce(syncInView, 400);
+  // ✅ 초기 지도 표시 직후 1회만 최신화
+  syncInViewOnce();
+}, [map, currentUser?.data_file]);
 
-  const onDragEnd = () => debounced();
-  const onZoomChanged = () => debounced();
-
-  window.kakao.maps.event.addListener(map, "dragend", onDragEnd);
-  window.kakao.maps.event.addListener(map, "zoom_changed", onZoomChanged);
-
-  debounced();
-
-  return () => {
-    window.kakao.maps.event.removeListener(map, "dragend", onDragEnd);
-    window.kakao.maps.event.removeListener(map, "zoom_changed", onZoomChanged);
-  };
-}, [map, currentUser?.data_file]); // ✅ 변경
 
 
 
