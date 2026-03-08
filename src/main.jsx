@@ -914,8 +914,9 @@ rows.forEach((d) => {
   }
 
   if (!navigator.geolocation) {
-    const fallbackUrl = `https://map.kakao.com/link/to/${encodeURIComponent(destLabel)},${destLat},${destLng}`;
-    window.open(fallbackUrl, "_blank", "noopener,noreferrer");
+    const fallbackUrl =
+      `https://map.kakao.com/link/to/${encodeURIComponent(destLabel)},${destLat},${destLng}`;
+    window.location.href = fallbackUrl;
     return;
   }
 
@@ -925,23 +926,23 @@ rows.forEach((d) => {
       const curLng = Number(pos.coords.longitude);
 
       if (!Number.isFinite(curLat) || !Number.isFinite(curLng)) {
-        const fallbackUrl = `https://map.kakao.com/link/to/${encodeURIComponent(destLabel)},${destLat},${destLng}`;
-        window.open(fallbackUrl, "_blank", "noopener,noreferrer");
+        const fallbackUrl =
+          `https://map.kakao.com/link/to/${encodeURIComponent(destLabel)},${destLat},${destLng}`;
+        window.location.href = fallbackUrl;
         return;
       }
 
-      // ✅ 카카오맵 길찾기: 현재위치 → 목적지
       const routeUrl =
         `https://map.kakao.com/link/from/${encodeURIComponent("현재위치")},${curLat},${curLng}` +
         `/to/${encodeURIComponent(destLabel)},${destLat},${destLng}`;
 
-      window.open(routeUrl, "_blank", "noopener,noreferrer");
+      // 모바일에서는 새 탭보다 현재 탭 이동이 더 안정적
+      window.location.href = routeUrl;
     },
-    (err) => {
-      console.warn("[WARN][NAVI] 현재 위치를 가져오지 못함:", err?.message);
-
-      const fallbackUrl = `https://map.kakao.com/link/to/${encodeURIComponent(destLabel)},${destLat},${destLng}`;
-      window.open(fallbackUrl, "_blank", "noopener,noreferrer");
+    () => {
+      const fallbackUrl =
+        `https://map.kakao.com/link/to/${encodeURIComponent(destLabel)},${destLat},${destLng}`;
+      window.location.href = fallbackUrl;
     },
     {
       enableHighAccuracy: true,
