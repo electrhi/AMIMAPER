@@ -913,9 +913,13 @@ rows.forEach((d) => {
     return;
   }
 
+  const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || "");
+
   if (!navigator.geolocation) {
-    const fallbackUrl =
-      `https://map.kakao.com/link/to/${encodeURIComponent(destLabel)},${destLat},${destLng}`;
+    const fallbackUrl = isMobile
+      ? `https://m.map.kakao.com/scheme/look?p=${destLat},${destLng}`
+      : `https://map.kakao.com/link/to/${encodeURIComponent(destLabel)},${destLat},${destLng}`;
+
     window.location.href = fallbackUrl;
     return;
   }
@@ -926,22 +930,38 @@ rows.forEach((d) => {
       const curLng = Number(pos.coords.longitude);
 
       if (!Number.isFinite(curLat) || !Number.isFinite(curLng)) {
-        const fallbackUrl =
-          `https://map.kakao.com/link/to/${encodeURIComponent(destLabel)},${destLat},${destLng}`;
+        const fallbackUrl = isMobile
+          ? `https://m.map.kakao.com/scheme/look?p=${destLat},${destLng}`
+          : `https://map.kakao.com/link/to/${encodeURIComponent(destLabel)},${destLat},${destLng}`;
+
         window.location.href = fallbackUrl;
         return;
       }
 
-      const routeUrl =
+      // ✅ 모바일: 카카오 공식 모바일웹 스킴 사용
+      if (isMobile) {
+        const mobileRouteUrl =
+          `https://m.map.kakao.com/scheme/route?sp=${curLat},${curLng}` +
+          `&ep=${destLat},${destLng}&by=car`;
+
+        window.location.href = mobileRouteUrl;
+        return;
+      }
+
+      // ✅ PC: 기존 웹 길찾기 링크 사용
+      const pcRouteUrl =
         `https://map.kakao.com/link/from/${encodeURIComponent("현재위치")},${curLat},${curLng}` +
         `/to/${encodeURIComponent(destLabel)},${destLat},${destLng}`;
 
-      // 모바일에서는 새 탭보다 현재 탭 이동이 더 안정적
-      window.location.href = routeUrl;
+      window.open(pcRouteUrl, "_blank", "noopener,noreferrer");
     },
-    () => {
-      const fallbackUrl =
-        `https://map.kakao.com/link/to/${encodeURIComponent(destLabel)},${destLat},${destLng}`;
+    (err) => {
+      console.warn("[WARN][NAVI] 현재 위치를 가져오지 못함:", err?.message);
+
+      const fallbackUrl = isMobile
+        ? `https://m.map.kakao.com/scheme/look?p=${destLat},${destLng}`
+        : `https://map.kakao.com/link/to/${encodeURIComponent(destLabel)},${destLat},${destLng}`;
+
       window.location.href = fallbackUrl;
     },
     {
@@ -952,6 +972,8 @@ rows.forEach((d) => {
   );
 };
 
+
+  
   /** 마커 개수 필터 적용 버튼 **/
   const handleApplyFilter = () => {
     console.log("[DEBUG][FILTER] 적용 시도, minMarkerCount =", minMarkerCount);
