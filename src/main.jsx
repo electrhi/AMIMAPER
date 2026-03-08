@@ -6,7 +6,6 @@ import * as XLSX from "xlsx";
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_KEY;
 const KAKAO_KEY = import.meta.env.VITE_KAKAO_JAVASCRIPT_KEY;
-const KAKAO_SDK_KEY = import.meta.env.VITE_KAKAO_JAVASCRIPT_KEY;
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // ✅ 계기번호 공통 정규화 함수 (모든 종류의 공백/제로폭문자 제거)
@@ -753,49 +752,6 @@ rows.forEach((d) => {
     };
     document.head.appendChild(script);
   }, [loggedIn]);
-
-
-  useEffect(() => {
-  if (!loggedIn) return;
-
-  if (window.Kakao) {
-    try {
-      if (!window.Kakao.isInitialized()) {
-        window.Kakao.init(KAKAO_SDK_KEY);
-      }
-      console.log("[DEBUG][KAKAO SDK] ✅ 기존 SDK 사용");
-    } catch (e) {
-      console.error("[ERROR][KAKAO SDK] init 실패:", e.message);
-    }
-    return;
-  }
-
-  const existing = document.querySelector('script[data-kakao-sdk="true"]');
-  if (existing) return;
-
-  const sdkScript = document.createElement("script");
-  sdkScript.src = "https://t1.kakaocdn.net/kakao_js_sdk/2.7.6/kakao.min.js";
-  sdkScript.async = true;
-  sdkScript.dataset.kakaoSdk = "true";
-
-  sdkScript.onload = () => {
-    try {
-      if (!window.Kakao.isInitialized()) {
-        window.Kakao.init(KAKAO_SDK_KEY);
-      }
-      console.log("[DEBUG][KAKAO SDK] ✅ 초기화 완료");
-    } catch (e) {
-      console.error("[ERROR][KAKAO SDK] init 실패:", e.message);
-    }
-  };
-
-  sdkScript.onerror = () => {
-    console.error("[ERROR][KAKAO SDK] 스크립트 로드 실패");
-  };
-
-  document.head.appendChild(sdkScript);
-}, [loggedIn]);
-
   
 
   useEffect(() => {
@@ -957,28 +913,42 @@ rows.forEach((d) => {
     return;
   }
 
-  const isMobileDevice = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || "");
-
-  // ✅ fallback용: 현재 위치 없이도 목적지 지도는 열 수 있게 유지
-  const mapUrl = `https://map.kakao.com/link/map/${encodeURIComponent(destLabel)},${destLat},${destLng}`;
-
-  // ✅ 모바일에서는 카카오내비 앱 실행 시도
-  if (isMobileDevice && window.Kakao?.Navi) {
-    try {
-      window.Kakao.Navi.start({
-        name: destLabel || "목적지",
-        x: Number(destLng),
-        y: Number(destLat),
-        coordType: "wgs84",
-      });
-      return;
-    } catch (e) {
-      console.error("[ERROR][NAVI] Kakao.Navi.start 실패:", e.message);
-    }
+  if (!navigator.geolocation) {
+    const fallbackUrl = `https://map.kakao.com/link/to/${encodeURIComponent(destLabel)},${destLat},${destLng}`;
+    window.open(fallbackUrl, "_blank", "noopener,noreferrer");
+    return;
   }
 
-  // ✅ fallback: 현재 페이지 유지 + 새 탭
-  window.open(mapUrl, "_blank", "noopener,noreferrer");
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      const curLat = Number(pos.coords.latitude);
+      const curLng = Number(pos.coords.longitude);
+
+      if (!Number.isFinite(curLat) || !Number.isFinite(curLng)) {
+        const fallbackUrl = `https://map.kakao.com/link/to/${encodeURIComponent(destLabel)},${destLat},${destLng}`;
+        window.open(fallbackUrl, "_blank", "noopener,noreferrer");
+        return;
+      }
+
+      // ✅ 카카오맵 길찾기: 현재위치 → 목적지
+      const routeUrl =
+        `https://map.kakao.com/link/from/${encodeURIComponent("현재위치")},${curLat},${curLng}` +
+        `/to/${encodeURIComponent(destLabel)},${destLat},${destLng}`;
+
+      window.open(routeUrl, "_blank", "noopener,noreferrer");
+    },
+    (err) => {
+      console.warn("[WARN][NAVI] 현재 위치를 가져오지 못함:", err?.message);
+
+      const fallbackUrl = `https://map.kakao.com/link/to/${encodeURIComponent(destLabel)},${destLat},${destLng}`;
+      window.open(fallbackUrl, "_blank", "noopener,noreferrer");
+    },
+    {
+      enableHighAccuracy: true,
+      timeout: 5000,
+      maximumAge: 10000,
+    }
+  );
 };
 
   /** 마커 개수 필터 적용 버튼 **/
