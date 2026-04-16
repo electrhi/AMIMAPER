@@ -18,6 +18,39 @@ const normalizeMeterId = (id) =>
 // ✅ 상태 옵션(필터용)
 const STATUS_OPTIONS = ["완료", "불가", "미방문"];
 
+// ✅ 사용자 역할(권장: users.worker_type 컬럼 사용)
+const USER_ROLE = {
+  MODEM: "모뎀작업자",
+  METER: "계기작업자",
+  ADMIN: "관리자",
+};
+
+const resolveUserRole = (userRow) => {
+  const raw = String(
+    userRow?.worker_type ?? userRow?.user_type ?? userRow?.role ?? ""
+  )
+    .trim()
+    .toLowerCase();
+
+  if (raw === "관리자" || raw === "admin") return USER_ROLE.ADMIN;
+  if (raw === "계기작업자" || raw === "meter" || raw === "meter_worker") {
+    return USER_ROLE.METER;
+  }
+  if (raw === "모뎀작업자" || raw === "modem" || raw === "modem_worker") {
+    return USER_ROLE.MODEM;
+  }
+
+  if (
+    userRow?.can_view_others === true ||
+    String(userRow?.can_view_others || "").toLowerCase() === "y"
+  ) {
+    return USER_ROLE.ADMIN;
+  }
+
+  return USER_ROLE.MODEM;
+};
+
+
 // ✅ 계기 타입 매핑(기존 renderMarkers 안에 있던 내용 그대로 이동)
 const METER_MAPPING = {
   "17": "E-Type",
@@ -217,11 +250,14 @@ const noCoordRows = React.useMemo(() => {
   const customEditDraftRef = useRef(null);
 
 
-  // ✅ 관리자 여부
-  const isAdmin =
-    currentUser?.can_view_others === true ||
-    String(currentUser?.can_view_others || "").toLowerCase() === "y";
+  // ✅ 사용자 역할 / 관리자 여부
+  const currentUserRole = React.useMemo(
+    () => resolveUserRole(currentUser),
+    [currentUser]
+  );
 
+  const isAdmin = currentUserRole === USER_ROLE.ADMIN;
+  const isMeterWorker = currentUserRole === USER_ROLE.METER;
 
   // 🔴 내 위치(방향 화살표) 엘리먼트 ref
   const myLocationArrowElRef = useRef(null);
@@ -1293,9 +1329,23 @@ const runSearch = () => {
 
   // ✅ 상태 + 농사 포함 여부 -> 마커 색
   const FARMING_YELLOW = "#f1c40f"; // 노란색(원하면 바꿔도 됨)
+  const METER_WORKER_ORANGE = "#ff8c00";
+
   const getMarkerColor = (status, hasFarming) => {
+    // ✅ 계기작업자:
+    // - 미방문(아무것도 안 누른 상태) = 주황
+    // - 완료(버튼 표시는 "교체") = 파랑
+    // - 불가 = 빨강
+    if (currentUserRole === USER_ROLE.METER) {
+      if (status === "완료") return "blue";
+      if (status === "불가") return "red";
+      return METER_WORKER_ORANGE;
+    }
+
+    // ✅ 관리자 / 모뎀작업자 기존 로직 유지
     if (status === "완료") return "green";
     if (status === "불가") return "red";
+
     // 미방문
     return hasFarming ? FARMING_YELLOW : "blue";
   };
@@ -1730,149 +1780,171 @@ const runSearch = () => {
           });
           popupEl.appendChild(closeBtn);
 
-                    const title = document.createElement("b");
-          title.textContent = pickAddress(list[0]);
+                    if (isMeterWorker) {
+            const uniqueListNos = Array.from(
+              new Set(
+                list
+                  .map((g) => String(g?.list_no || "").trim())
+                  .filter(Boolean)
+              )
+            );
 
-          popupEl.appendChild(title);
-          popupEl.appendChild(document.createElement("br"));
+            if (uniqueListNos.length === 0) {
+              const emptyDiv = document.createElement("div");
+              emptyDiv.textContent = "-";
+              emptyDiv.style.cssText = "padding:4px 0; font-weight:700;";
+              popupEl.appendChild(emptyDiv);
+            } else {
+              uniqueListNos.forEach((listNo) => {
+                const div = document.createElement("div");
+                div.textContent = listNo;
+                div.style.cssText = "padding:4px 0; font-weight:700;";
+                popupEl.appendChild(div);
+              });
+            }
+          } else {
+            const title = document.createElement("b");
+            title.textContent = pickAddress(list[0]);
 
-          // ✅ 건물명 표시 줄
-          const buildingLine = document.createElement("div");
-          buildingLine.style.cssText = "margin-top:4px; color:#444; font-weight:800;";
+            popupEl.appendChild(title);
+            popupEl.appendChild(document.createElement("br"));
 
-          const fromRowB = String(list[0]?.building_name || "").trim();
-          let cachedB = String(buildingNameCacheRef.current.get(key) || "").trim();
+            // ✅ 건물명 표시 줄
+            const buildingLine = document.createElement("div");
+            buildingLine.style.cssText = "margin-top:4px; color:#444; font-weight:800;";
 
-          // row에 건물명이 있으면 캐시에 저장
-          if ((!cachedB || cachedB === "__NONE__") && fromRowB) {
-            cachedB = fromRowB;
-            buildingNameCacheRef.current.set(key, cachedB);
-          }
+            const fromRowB = String(list[0]?.building_name || "").trim();
+            let cachedB = String(buildingNameCacheRef.current.get(key) || "").trim();
 
-          buildingLine.textContent =
-            cachedB && cachedB !== "__NONE__" ? `🏢 ${cachedB}` : "";
-
-          popupEl.appendChild(buildingLine);
-          popupEl.appendChild(document.createElement("br"));
-
-          // ✅ 여전히 없으면(coord2Address로 보조 조회) — 그리고 실패도 캐시해서 “매번 조회” 방지
-          if (!cachedB || cachedB === "__NONE__") {
-            (async () => {
-              const bn = await fetchBuildingNameByCoords(Number(coords.lat), Number(coords.lng));
-
-              if (!bn) {
-                buildingNameCacheRef.current.set(key, "__NONE__"); // ✅ 못찾음도 캐시
-                return;
-              }
-
-              buildingNameCacheRef.current.set(key, bn);
-              buildingLine.textContent = `🏢 ${bn}`;
-
-              const lbl = labelByKeyRef.current.get(key);
-              if (lbl?.el) {
-                lbl.el.textContent = `${pickAddress(list[0])} (${bn})`;
-              }
-            })();
-          }
-
-          
-
-          // 하나의 마커에 포함된 모든 계기번호 (문자열로 정규화)
-          const allIds = list.map((g) => String(g.meter_id || ""));
-
-          // ✅ 계기번호 뒤 2자리 기준으로 중복 개수 계산
-          const suffixCount = {};
-          allIds.forEach((id) => {
-            const suffix = id.slice(-2); // 맨 오른쪽 2자리
-            if (!suffix) return;
-            suffixCount[suffix] = (suffixCount[suffix] || 0) + 1;
-          });
-
-          // 중복 제거한 계기번호 목록
-          const uniqueMeters = Array.from(new Set(allIds));
-
-          uniqueMeters.forEach((id) => {
-            // 이 계기번호에 해당하는 행 하나 찾아서 통신방식/리스트번호 가져오기
-            const row =
-              list.find((g) => String(g.meter_id || "") === id) || {};
-
-            const type = getMeterType(id);
-
-            const listNo = row.list_no || "";
-            const commType = row.comm_type || "";
-
-            const div = document.createElement("div");
-            // ✅ 원하는 출력 형식: 리스트번호 | 통신방식 | 계기번호 | 계기타입
-            div.textContent = `${listNo} | ${commType} | ${id} | ${type}`;
-
-            // 기본 스타일
-            div.style.padding = "2px 0";
-            div.style.cursor = "pointer";
-            div.style.userSelect = "none";
-            div.title = "클릭 시 계기번호 복사";
-            div.dataset.selected = "0";
-
-            const applySelectedStyle = (on) => {
-              div.style.backgroundColor = on ? "#fff3bf" : "transparent"; // 옅은 노랑
-              div.style.borderRadius = on ? "6px" : "0px";
-              div.style.padding = on ? "2px 4px" : "2px 0";
-            };
-
-              // ✅ 동일 마커 내 "오른쪽 2자리"가 중복이면 글자색 빨강
-            const suffix = normalizeMeterId(id).slice(-2);
-            if (suffix && suffixCount[suffix] > 1) {
-              div.style.color = "red";
+            // row에 건물명이 있으면 캐시에 저장
+            if ((!cachedB || cachedB === "__NONE__") && fromRowB) {
+              cachedB = fromRowB;
+              buildingNameCacheRef.current.set(key, cachedB);
             }
 
+            buildingLine.textContent =
+              cachedB && cachedB !== "__NONE__" ? `🏢 ${cachedB}` : "";
 
-            applySelectedStyle(false);
+            popupEl.appendChild(buildingLine);
+            popupEl.appendChild(document.createElement("br"));
 
-            div.addEventListener("click", (e) => {
-              e.stopPropagation();
+            // ✅ 여전히 없으면(coord2Address로 보조 조회) — 그리고 실패도 캐시해서 “매번 조회” 방지
+            if (!cachedB || cachedB === "__NONE__") {
+              (async () => {
+                const bn = await fetchBuildingNameByCoords(Number(coords.lat), Number(coords.lng));
 
-              // ✅ 1) 토글
-              const nextOn = div.dataset.selected !== "1";
-              div.dataset.selected = nextOn ? "1" : "0";
-              applySelectedStyle(nextOn);
-
-              // ✅ 2) 복사
-              const meterIdToCopy = id;
-
-              if (navigator.clipboard && navigator.clipboard.writeText) {
-                navigator.clipboard.writeText(meterIdToCopy).catch((err) => {
-                  console.warn("[DEBUG][COPY] 실패:", err);
-                  alert("복사에 실패했습니다. 다시 시도해주세요.");
-                });
-                
-              } else {
-                const textarea = document.createElement("textarea");
-                textarea.value = meterIdToCopy;
-                textarea.style.position = "fixed";
-                textarea.style.top = "-9999px";
-                document.body.appendChild(textarea);
-                textarea.focus();
-                textarea.select();
-                try {
-                  document.execCommand("copy");
-                } catch (err) {
-                  alert("복사에 실패했습니다. 직접 복사해주세요.");
+                if (!bn) {
+                  buildingNameCacheRef.current.set(key, "__NONE__"); // ✅ 못찾음도 캐시
+                  return;
                 }
-                document.body.removeChild(textarea);
-              }
+
+                buildingNameCacheRef.current.set(key, bn);
+                buildingLine.textContent = `🏢 ${bn}`;
+
+                const lbl = labelByKeyRef.current.get(key);
+                if (lbl?.el) {
+                  lbl.el.textContent = `${pickAddress(list[0])} (${bn})`;
+                }
+              })();
+            }
+
+            // 하나의 마커에 포함된 모든 계기번호 (문자열로 정규화)
+            const allIds = list.map((g) => String(g.meter_id || ""));
+
+            // ✅ 계기번호 뒤 2자리 기준으로 중복 개수 계산
+            const suffixCount = {};
+            allIds.forEach((id) => {
+              const suffix = id.slice(-2); // 맨 오른쪽 2자리
+              if (!suffix) return;
+              suffixCount[suffix] = (suffixCount[suffix] || 0) + 1;
             });
 
+            // 중복 제거한 계기번호 목록
+            const uniqueMeters = Array.from(new Set(allIds));
 
+            uniqueMeters.forEach((id) => {
+              // 이 계기번호에 해당하는 행 하나 찾아서 통신방식/리스트번호 가져오기
+              const row =
+                list.find((g) => String(g.meter_id || "") === id) || {};
 
-            popupEl.appendChild(div);
-          });
+              const type = getMeterType(id);
+
+              const listNo = row.list_no || "";
+              const commType = row.comm_type || "";
+
+              const div = document.createElement("div");
+              // ✅ 원하는 출력 형식: 리스트번호 | 통신방식 | 계기번호 | 계기타입
+              div.textContent = `${listNo} | ${commType} | ${id} | ${type}`;
+
+              // 기본 스타일
+              div.style.padding = "2px 0";
+              div.style.cursor = "pointer";
+              div.style.userSelect = "none";
+              div.title = "클릭 시 계기번호 복사";
+              div.dataset.selected = "0";
+
+              const applySelectedStyle = (on) => {
+                div.style.backgroundColor = on ? "#fff3bf" : "transparent"; // 옅은 노랑
+                div.style.borderRadius = on ? "6px" : "0px";
+                div.style.padding = on ? "2px 4px" : "2px 0";
+              };
+
+              // ✅ 동일 마커 내 "오른쪽 2자리"가 중복이면 글자색 빨강
+              const suffix = normalizeMeterId(id).slice(-2);
+              if (suffix && suffixCount[suffix] > 1) {
+                div.style.color = "red";
+              }
+
+              applySelectedStyle(false);
+
+              div.addEventListener("click", (e) => {
+                e.stopPropagation();
+
+                // ✅ 1) 토글
+                const nextOn = div.dataset.selected !== "1";
+                div.dataset.selected = nextOn ? "1" : "0";
+                applySelectedStyle(nextOn);
+
+                // ✅ 2) 복사
+                const meterIdToCopy = id;
+
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                  navigator.clipboard.writeText(meterIdToCopy).catch((err) => {
+                    console.warn("[DEBUG][COPY] 실패:", err);
+                    alert("복사에 실패했습니다. 다시 시도해주세요.");
+                  });
+                } else {
+                  const textarea = document.createElement("textarea");
+                  textarea.value = meterIdToCopy;
+                  textarea.style.position = "fixed";
+                  textarea.style.top = "-9999px";
+                  document.body.appendChild(textarea);
+                  textarea.focus();
+                  textarea.select();
+                  try {
+                    document.execCommand("copy");
+                  } catch (err) {
+                    alert("복사에 실패했습니다. 직접 복사해주세요.");
+                  }
+                  document.body.removeChild(textarea);
+                }
+              });
+
+              popupEl.appendChild(div);
+            });
+          }
 
           popupEl.appendChild(document.createElement("hr"));
 
-         ["완료", "불가", "미방문", "가기"].forEach((text) => {
+         const popupButtons = isMeterWorker
+           ? ["교체", "불가", "미방문", "가기"]
+           : ["완료", "불가", "미방문", "가기"];
+
+         popupButtons.forEach((text) => {
            const btn = document.createElement("button");
            btn.textContent = text;
            btn.style.margin = "4px";
-           
+
            btn.addEventListener("click", async (e) => {
              e.stopPropagation();
 
@@ -1880,13 +1952,17 @@ const runSearch = () => {
       const destLabel = pickAddress(list[0]) || "목적지";
       const destLat = Number(coords.lat);
       const destLng = Number(coords.lng);
-      
+
       startNavigation(destLabel, destLat, destLng);
       return;
     }
 
+    const nextStatus =
+      isMeterWorker && text === "교체"
+        ? "완료"
+        : text;
 
-    await updateStatus(list.map((g) => g.meter_id), text, coords);
+    await updateStatus(list.map((g) => g.meter_id), nextStatus, coords);
     await loadOtherUserLocations();
   });
 
@@ -3615,8 +3691,7 @@ useEffect(() => {
         🗺️ 지도 전환 ({mapType === "ROADMAP" ? "스카이뷰" : "일반"})
       </button>
 
-      {(currentUser?.can_view_others === true ||
-        currentUser?.can_view_others === "y") && (
+      {isAdmin && (
         <div
           style={{
             position: "fixed",
