@@ -59,8 +59,9 @@ const normalizeStatusValue = (status) => {
 const getVisibleStatusByRole = (status, role) => {
   const s = normalizeStatusValue(status);
 
-  // ✅ 계기작업자의 "교체"는 모뎀작업자/관리자에게는 "미방문"처럼 보이게 처리
-  if (role !== USER_ROLE.METER && s === "교체") return "미방문";
+  // ✅ 상단 카운트/필터 UI는 기존 3개(완료/불가/미방문) 유지
+  //    따라서 "교체"는 모든 역할에서 "미방문" 버킷으로 집계/필터링
+  if (s === "교체") return "미방문";
 
   return s;
 };
@@ -1344,30 +1345,21 @@ const runSearch = () => {
   };
 
   // ✅ 상태 + 농사 포함 여부 -> 마커 색
-  const FARMING_YELLOW = "#f1c40f"; // 노란색(원하면 바꿔도 됨)
-  const METER_WORKER_ORANGE = "#ff8c00";
+  const FARMING_YELLOW = "#f1c40f"; // 기존 변수 유지
+  const DEFAULT_UNVISITED_ORANGE = "#ff8c00";
 
   const getMarkerColor = (status, hasFarming) => {
     const rawStatus = normalizeStatusValue(status);
-    const visibleStatus = getVisibleStatusByRole(rawStatus, currentUserRole);
 
-    // ✅ 계기작업자:
-    // - 미방문(아무것도 안 누른 상태) = 주황
-    // - 교체 = 파랑
-    // - 불가 = 빨강
-    // - 완료는 기존 완료 작업으로 간주하여 파랑 유지
-    if (currentUserRole === USER_ROLE.METER) {
-      if (rawStatus === "교체" || rawStatus === "완료") return "blue";
-      if (rawStatus === "불가") return "red";
-      return METER_WORKER_ORANGE;
-    }
+    // ✅ 최종 상태 흐름
+    //    미방문(주황) -> 교체(파랑) -> 완료(초록) | 불가(빨강)
+    //    * 사용자 역할과 무관하게 동일 색상 적용
+    if (rawStatus === "완료") return "green";
+    if (rawStatus === "불가") return "red";
+    if (rawStatus === "교체") return "blue";
 
-    // ✅ 관리자 / 모뎀작업자에서는 "교체"를 "미방문"처럼 표시
-    if (visibleStatus === "완료") return "green";
-    if (visibleStatus === "불가") return "red";
-
-    // 미방문
-    return hasFarming ? FARMING_YELLOW : "blue";
+    // ✅ 사용자의 최종 요청: 기존 미방문은 모두 주황색
+    return DEFAULT_UNVISITED_ORANGE;
   };
   
   // ✅ overlay 색상만 변경 (농사 미방문은 노란색)
@@ -2536,7 +2528,7 @@ useEffect(() => {
     }
   };
 
-  /** 상태 업데이트 (버튼 클릭 시만 DB 업로드, 계기작업자 교체는 raw status="교체"로 저장) **/
+  /** 상태 업데이트 (버튼 클릭 시만 DB 업로드, 상태 흐름: 미방문 > 교체 > 완료 | 불가) **/
   const updateStatus = async (meterIds, newStatus, coords) => {
     try {
       console.log(
