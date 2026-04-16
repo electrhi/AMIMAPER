@@ -1477,7 +1477,15 @@ const runSearch = () => {
 
     const matchedData = data.map((row, idx) => {
       const addr = normalizeAddr(row.address);
-      if (!addr) return { ...row, lat: null, lng: null };
+      if (!addr) {
+        return {
+          ...row,
+          lat: row?.lat ?? null,
+          lng: row?.lng ?? null,
+          road_address: row.road_address || "",
+          building_name: row.building_name || "",
+        };
+      }
 
       // 1단계: 완전 일치
       const exact = normalizedCacheEntries.find(([key]) => key === addr);
@@ -1487,9 +1495,8 @@ const runSearch = () => {
           ...row,
           lat: parseFloat(exact[1].lat),
           lng: parseFloat(exact[1].lng),
-
-          road_address: exact[1].road_address || row.road_address || "", // ✅ 추가
-          building_name: exact[1].building_name || row.building_name || "", // ✅ 추가
+          road_address: exact[1].road_address || row.road_address || "",
+          building_name: exact[1].building_name || row.building_name || "",
         };
       }
 
@@ -1503,7 +1510,6 @@ const runSearch = () => {
           ...row,
           lat: parseFloat(partial[1].lat),
           lng: parseFloat(partial[1].lng),
-
           road_address: partial[1].road_address || row.road_address || "",
           building_name: partial[1].building_name || row.building_name || "",
         };
@@ -1521,7 +1527,6 @@ const runSearch = () => {
           ...row,
           lat: parseFloat(similar[1].lat),
           lng: parseFloat(similar[1].lng),
-
           road_address: similar[1].road_address || row.road_address || "",
           building_name: similar[1].building_name || row.building_name || "",
         };
@@ -1535,8 +1540,13 @@ const runSearch = () => {
         });
       }
 
-      return { ...row, lat: null, lng: null, road_address: row.road_address || "", building_name: row.building_name || "" };
-      
+      return {
+        ...row,
+        lat: row?.lat ?? null,
+        lng: row?.lng ?? null,
+        road_address: row.road_address || "",
+        building_name: row.building_name || "",
+      };
     });
 
     console.log(
@@ -1548,12 +1558,23 @@ const runSearch = () => {
       console.groupEnd();
     }
 
+    const hasLayoutChange = matchedData.some((row, idx) => {
+      const prev = data[idx] || {};
+      return (
+        String(prev?.lat ?? "") !== String(row?.lat ?? "") ||
+        String(prev?.lng ?? "") !== String(row?.lng ?? "") ||
+        String(prev?.road_address ?? "") !== String(row?.road_address ?? "") ||
+        String(prev?.building_name ?? "") !== String(row?.building_name ?? "")
+      );
+    });
+
+    if (!hasLayoutChange) return;
+
     setData(matchedData);
 
     // ✅ 좌표/그룹(레이아웃)이 바뀐 순간만 전체 렌더 필요 신호
     setLayoutVersion((v) => v + 1);
-    
-  }, [geoCache]);
+  }, [geoCache, data]);
 
 
   /** 마커 렌더링 **/
