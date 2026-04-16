@@ -50,6 +50,21 @@ const resolveUserRole = (userRow) => {
   return USER_ROLE.MODEM;
 };
 
+// ✅ 상태 정규화 / 역할별 표시 상태
+const normalizeStatusValue = (status) => {
+  const s = String(status ?? "").trim();
+  return s || "미방문";
+};
+
+const getVisibleStatusByRole = (status, role) => {
+  const s = normalizeStatusValue(status);
+
+  // ✅ 계기작업자의 "교체"는 모뎀작업자/관리자에게는 "미방문"처럼 보이게 처리
+  if (role !== USER_ROLE.METER && s === "교체") return "미방문";
+
+  return s;
+};
+
 
 // ✅ 계기 타입 매핑(기존 renderMarkers 안에 있던 내용 그대로 이동)
 const METER_MAPPING = {
@@ -520,7 +535,8 @@ useEffect(() => {
   const next = { 완료: 0, 불가: 0, 미방문: 0 };
 
   for (const r of data || []) {
-    next[r.status] = (next[r.status] || 0) + 1;
+    const visibleStatus = getVisibleStatusByRole(r?.status, currentUserRole);
+    next[visibleStatus] = (next[visibleStatus] || 0) + 1;
   }
 
   setCounts((prev) => {
@@ -530,7 +546,7 @@ useEffect(() => {
       prev.미방문 === next.미방문;
     return same ? prev : next;
   });
-}, [data]);
+}, [data, currentUserRole]);
 
 // ✅ meters 최신 상태 캐시 (meter_id -> row)
 const metersCacheRef = useRef(new Map());
@@ -1332,19 +1348,23 @@ const runSearch = () => {
   const METER_WORKER_ORANGE = "#ff8c00";
 
   const getMarkerColor = (status, hasFarming) => {
+    const rawStatus = normalizeStatusValue(status);
+    const visibleStatus = getVisibleStatusByRole(rawStatus, currentUserRole);
+
     // ✅ 계기작업자:
     // - 미방문(아무것도 안 누른 상태) = 주황
-    // - 완료(버튼 표시는 "교체") = 파랑
+    // - 교체 = 파랑
     // - 불가 = 빨강
+    // - 완료는 기존 완료 작업으로 간주하여 파랑 유지
     if (currentUserRole === USER_ROLE.METER) {
-      if (status === "완료") return "blue";
-      if (status === "불가") return "red";
+      if (rawStatus === "교체" || rawStatus === "완료") return "blue";
+      if (rawStatus === "불가") return "red";
       return METER_WORKER_ORANGE;
     }
 
-    // ✅ 관리자 / 모뎀작업자 기존 로직 유지
-    if (status === "완료") return "green";
-    if (status === "불가") return "red";
+    // ✅ 관리자 / 모뎀작업자에서는 "교체"를 "미방문"처럼 표시
+    if (visibleStatus === "완료") return "green";
+    if (visibleStatus === "불가") return "red";
 
     // 미방문
     return hasFarming ? FARMING_YELLOW : "blue";
@@ -1592,7 +1612,8 @@ const runSearch = () => {
       const typeSet = meterTypeFilters.length ? new Set(meterTypeFilters) : null;
       
       const filteredForMap = filteredData.filter((r) => {
-        const okStatus = !statusSet || statusSet.has(r.status);
+        const visibleStatus = getVisibleStatusByRole(r?.status, currentUserRole);
+        const okStatus = !statusSet || statusSet.has(visibleStatus);
         const okType = !typeSet || typeSet.has(getMeterType(r.meter_id));
         return okStatus && okType;
       });
@@ -1959,7 +1980,7 @@ const runSearch = () => {
 
     const nextStatus =
       isMeterWorker && text === "교체"
-        ? "완료"
+        ? "교체"
         : text;
 
     await updateStatus(list.map((g) => g.meter_id), nextStatus, coords);
@@ -2515,7 +2536,7 @@ useEffect(() => {
     }
   };
 
-  /** 상태 업데이트 (버튼 클릭 시만 DB 업로드) **/
+  /** 상태 업데이트 (버튼 클릭 시만 DB 업로드, 계기작업자 교체는 raw status="교체"로 저장) **/
   const updateStatus = async (meterIds, newStatus, coords) => {
     try {
       console.log(
