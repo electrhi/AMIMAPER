@@ -187,6 +187,9 @@ function AdminPage({ currentUser, onBack }) {
   const [selectedFile, setSelectedFile] = useState(null);
   const [editing, setEditing] = useState(null);
   const [searchText, setSearchText] = useState("");
+  const [viewportWidth, setViewportWidth] = useState(() =>
+    typeof window !== "undefined" ? window.innerWidth : 1280
+  );
   const pollingTimerRef = useRef(null);
   const [uploadProgress, setUploadProgress] = useState({
     open: false,
@@ -196,6 +199,15 @@ function AdminPage({ currentUser, onBack }) {
     status: "idle",
     error: "",
   });
+
+  const isMobileAdmin = viewportWidth <= 820;
+  const isTabletAdmin = viewportWidth <= 1180;
+
+  useEffect(() => {
+    const onResize = () => setViewportWidth(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   const dedupedFiles = React.useMemo(() => {
     const byName = new Map();
@@ -238,6 +250,19 @@ function AdminPage({ currentUser, onBack }) {
         .includes(q);
     });
   }, [users, searchText]);
+
+  const fileStats = React.useMemo(() => {
+    const base = { total: dedupedFiles.length, ready: 0, processing: 0, failed: 0 };
+    for (const row of dedupedFiles) {
+      const status = String(row?.status ?? "").trim().toLowerCase();
+      if (status === FILE_STATUS_FAILED) base.failed += 1;
+      else if (status === FILE_STATUS_PROCESSING || status === FILE_STATUS_UPLOADED) base.processing += 1;
+      else if (status === FILE_STATUS_READY || row?.source === "bucket" || getFileProgressPercent(row, 0) >= 100) {
+        base.ready += 1;
+      }
+    }
+    return base;
+  }, [dedupedFiles]);
 
   const stopPolling = () => {
     if (pollingTimerRef.current) {
@@ -575,191 +600,356 @@ function AdminPage({ currentUser, onBack }) {
     }
   };
 
+  const getFileStatusMeta = (row) => {
+    const status = String(row?.status ?? "").trim().toLowerCase();
+    if (status === FILE_STATUS_FAILED) {
+      return { label: "실패", chipBg: "rgba(239,68,68,0.12)", chipColor: "#b91c1c", border: "rgba(239,68,68,0.22)" };
+    }
+    if (status === FILE_STATUS_PROCESSING || status === FILE_STATUS_UPLOADED) {
+      return { label: "처리 중", chipBg: "rgba(59,130,246,0.12)", chipColor: "#1d4ed8", border: "rgba(59,130,246,0.24)" };
+    }
+    return { label: "준비 완료", chipBg: "rgba(16,185,129,0.12)", chipColor: "#047857", border: "rgba(16,185,129,0.24)" };
+  };
+
+  const shellBg = {
+    minHeight: "100vh",
+    background: "linear-gradient(180deg, #f3f6fb 0%, #eef3ff 26%, #f8fbff 100%)",
+    padding: isMobileAdmin ? 12 : 20,
+    boxSizing: "border-box",
+  };
+
+  const cardStyle = {
+    background: "rgba(255,255,255,0.88)",
+    border: "1px solid rgba(148,163,184,0.18)",
+    borderRadius: isMobileAdmin ? 18 : 24,
+    boxShadow: "0 20px 60px rgba(15,23,42,0.08)",
+    backdropFilter: "blur(14px)",
+  };
+
+  const subtleCardStyle = {
+    ...cardStyle,
+    boxShadow: "0 10px 28px rgba(15,23,42,0.06)",
+  };
+
+  const primaryButton = {
+    width: "100%",
+    padding: isMobileAdmin ? "14px 14px" : "15px 16px",
+    borderRadius: 14,
+    border: "none",
+    background: uploading
+      ? "linear-gradient(135deg, #94a3b8 0%, #64748b 100%)"
+      : "linear-gradient(135deg, #1d4ed8 0%, #2563eb 50%, #3b82f6 100%)",
+    color: "white",
+    cursor: uploading ? "default" : "pointer",
+    fontWeight: 800,
+    letterSpacing: "0.01em",
+    boxShadow: uploading ? "none" : "0 18px 30px rgba(37,99,235,0.22)",
+  };
+
+  const ghostButton = {
+    padding: isMobileAdmin ? "11px 12px" : "10px 14px",
+    borderRadius: 12,
+    border: "1px solid rgba(148,163,184,0.28)",
+    background: "rgba(255,255,255,0.84)",
+    cursor: "pointer",
+    fontWeight: 700,
+    color: "#0f172a",
+    boxShadow: "0 6px 14px rgba(15,23,42,0.04)",
+  };
+
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        background: "#f5f7fb",
-        padding: 16,
-        boxSizing: "border-box",
-      }}
-    >
-      <div style={{ maxWidth: 1280, margin: "0 auto" }}>
+    <div style={shellBg}>
+      <div style={{ maxWidth: 1400, margin: "0 auto" }}>
         <div
           style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: 12,
+            ...cardStyle,
+            padding: isMobileAdmin ? 16 : 24,
             marginBottom: 16,
-            flexWrap: "wrap",
+            background:
+              "radial-gradient(circle at top right, rgba(59,130,246,0.12), transparent 34%), linear-gradient(135deg, rgba(15,23,42,0.96) 0%, rgba(30,41,59,0.94) 58%, rgba(37,99,235,0.92) 100%)",
+            color: "white",
+            border: "1px solid rgba(255,255,255,0.08)",
           }}
         >
-          <div>
-            <div style={{ fontSize: 24, fontWeight: 800, color: "#222" }}>
-              관리자 페이지
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: isMobileAdmin ? "stretch" : "flex-start",
+              gap: 14,
+              flexDirection: isMobileAdmin ? "column" : "row",
+            }}
+          >
+            <div style={{ minWidth: 0 }}>
+              <div
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                  borderRadius: 999,
+                  padding: "6px 12px",
+                  background: "rgba(255,255,255,0.08)",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  marginBottom: 12,
+                }}
+              >
+                <span style={{ width: 8, height: 8, borderRadius: 999, background: "#22c55e" }} />
+                ADMIN CONSOLE
+              </div>
+              <div style={{ fontSize: isMobileAdmin ? 26 : 32, fontWeight: 900, letterSpacing: "-0.03em" }}>
+                관리자 페이지
+              </div>
+              <div
+                style={{
+                  marginTop: 10,
+                  color: "rgba(255,255,255,0.8)",
+                  lineHeight: 1.6,
+                  fontSize: isMobileAdmin ? 13 : 14,
+                  maxWidth: 680,
+                }}
+              >
+                사용자 관리, 엑셀 업로드, 파일 배정을 한 화면에서 처리할 수 있도록 정리한 운영 콘솔입니다.
+                모바일에서도 카드형 레이아웃으로 읽기 쉽도록 구성했습니다.
+              </div>
             </div>
-            <div style={{ fontSize: 13, color: "#666", marginTop: 4 }}>
-              사용자 관리 / 엑셀 업로드 / data_file 배정
-            </div>
-          </div>
 
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <div
               style={{
-                padding: "8px 12px",
-                borderRadius: 999,
-                background: "#fff",
-                border: "1px solid #ddd",
-                fontSize: 13,
-                fontWeight: 700,
+                display: "grid",
+                gap: 10,
+                alignSelf: isMobileAdmin ? "stretch" : "flex-start",
+                minWidth: isMobileAdmin ? "100%" : 250,
               }}
             >
-              관리자: {currentUser?.id || "-"}
-            </div>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 10,
+                  background: "rgba(255,255,255,0.08)",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  borderRadius: 16,
+                  padding: "12px 14px",
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: 11, color: "rgba(255,255,255,0.64)", marginBottom: 4 }}>로그인 관리자</div>
+                  <div style={{ fontWeight: 800, fontSize: 15 }}>{currentUser?.id || "-"}</div>
+                </div>
+                <div
+                  style={{
+                    padding: "6px 10px",
+                    borderRadius: 999,
+                    background: "rgba(34,197,94,0.18)",
+                    color: "#bbf7d0",
+                    fontSize: 12,
+                    fontWeight: 800,
+                  }}
+                >
+                  ONLINE
+                </div>
+              </div>
 
-            <button
-              onClick={onBack}
-              style={{
-                padding: "10px 14px",
-                borderRadius: 10,
-                border: "1px solid #ddd",
-                background: "#fff",
-                cursor: "pointer",
-                fontWeight: 800,
-              }}
-            >
-              지도로 돌아가기
-            </button>
+              <button onClick={onBack} style={{ ...ghostButton, width: "100%", background: "rgba(255,255,255,0.94)" }}>
+                지도로 돌아가기
+              </button>
+            </div>
           </div>
         </div>
 
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "minmax(340px, 420px) minmax(0, 1fr)",
+            gridTemplateColumns: isMobileAdmin ? "1fr" : "repeat(4, minmax(0, 1fr))",
+            gap: 12,
+            marginBottom: 16,
+          }}
+        >
+          {[
+            { label: "관리 대상 사용자", value: users.length, tone: "#0f172a", bg: "rgba(15,23,42,0.06)" },
+            { label: "배정 가능 파일", value: readyFiles.length, tone: "#047857", bg: "rgba(16,185,129,0.10)" },
+            { label: "처리 중 파일", value: fileStats.processing, tone: "#1d4ed8", bg: "rgba(59,130,246,0.10)" },
+            { label: "실패 파일", value: fileStats.failed, tone: "#b91c1c", bg: "rgba(239,68,68,0.10)" },
+          ].map((item) => (
+            <div key={item.label} style={{ ...subtleCardStyle, padding: 16 }}>
+              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 8 }}>{item.label}</div>
+              <div style={{ fontSize: isMobileAdmin ? 24 : 30, fontWeight: 900, color: item.tone, letterSpacing: "-0.03em" }}>
+                {item.value}
+              </div>
+              <div style={{ marginTop: 10, height: 8, borderRadius: 999, background: item.bg }} />
+            </div>
+          ))}
+        </div>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: isTabletAdmin ? "1fr" : "390px minmax(0, 1fr)",
             gap: 16,
+            alignItems: "start",
           }}
         >
           <div style={{ display: "grid", gap: 16 }}>
-            <div
-              style={{
-                background: "#fff",
-                borderRadius: 16,
-                border: "1px solid #e5e7eb",
-                boxShadow: "0 6px 24px rgba(0,0,0,0.05)",
-                padding: 16,
-              }}
-            >
-              <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 10 }}>
-                엑셀 업로드
+            <div style={{ ...cardStyle, padding: isMobileAdmin ? 16 : 20 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 14 }}>
+                <div>
+                  <div style={{ fontSize: 20, fontWeight: 900, color: "#0f172a" }}>엑셀 업로드</div>
+                  <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>
+                    원본 업로드 후 서버에서 도로명주소, 건물명, geoCache를 생성합니다.
+                  </div>
+                </div>
+                <div
+                  style={{
+                    padding: "6px 10px",
+                    borderRadius: 999,
+                    background: uploading ? "rgba(59,130,246,0.12)" : "rgba(15,23,42,0.06)",
+                    color: uploading ? "#1d4ed8" : "#334155",
+                    fontSize: 12,
+                    fontWeight: 800,
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {uploading ? "처리 중" : "대기"}
+                </div>
               </div>
 
-              <input
-                id="admin-upload-input"
-                type="file"
-                accept=".xlsx"
-                onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
-                style={{ width: "100%", marginBottom: 12 }}
-              />
-
-              <div style={{ fontSize: 13, color: "#666", lineHeight: 1.5, marginBottom: 12 }}>
-                업로드 후 Edge Function이 도로명주소/건물명/lat/lng 및 geoCache를 생성합니다.
-              </div>
-
-              <button
-                onClick={handleUpload}
-                disabled={uploading}
+              <label
+                htmlFor="admin-upload-input"
                 style={{
-                  width: "100%",
-                  padding: "12px 14px",
-                  borderRadius: 12,
-                  border: "none",
-                  background: uploading ? "#94a3b8" : "#2563eb",
-                  color: "white",
-                  cursor: uploading ? "default" : "pointer",
-                  fontWeight: 800,
+                  display: "grid",
+                  gap: 8,
+                  borderRadius: 18,
+                  border: "1px dashed rgba(59,130,246,0.35)",
+                  background: "linear-gradient(180deg, rgba(239,246,255,0.85) 0%, rgba(248,250,252,0.88) 100%)",
+                  padding: isMobileAdmin ? 14 : 18,
+                  marginBottom: 14,
+                  cursor: "pointer",
                 }}
               >
-                {uploading ? "업로드 처리 중..." : "엑셀 업로드"}
+                <div style={{ fontWeight: 800, color: "#0f172a" }}>업로드할 .xlsx 파일 선택</div>
+                <div style={{ fontSize: 12, color: "#64748b", lineHeight: 1.5, wordBreak: "break-all" }}>
+                  {selectedFile ? `${selectedFile.name} 선택됨` : "모바일에서도 바로 선택할 수 있습니다."}
+                </div>
+                <div
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    width: isMobileAdmin ? "100%" : 140,
+                    padding: "10px 12px",
+                    borderRadius: 12,
+                    background: "rgba(37,99,235,0.1)",
+                    color: "#1d4ed8",
+                    fontWeight: 800,
+                    fontSize: 13,
+                  }}
+                >
+                  파일 선택
+                </div>
+                <input
+                  id="admin-upload-input"
+                  type="file"
+                  accept=".xlsx"
+                  onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+                  style={{ display: "none" }}
+                />
+              </label>
+
+              <button onClick={handleUpload} disabled={uploading} style={primaryButton}>
+                {uploading ? "업로드 처리 중..." : "엑셀 업로드 시작"}
               </button>
             </div>
 
-            <div
-              style={{
-                background: "#fff",
-                borderRadius: 16,
-                border: "1px solid #e5e7eb",
-                boxShadow: "0 6px 24px rgba(0,0,0,0.05)",
-                padding: 16,
-              }}
-            >
+            <div style={{ ...cardStyle, padding: isMobileAdmin ? 16 : 20 }}>
               <div
                 style={{
                   display: "flex",
                   justifyContent: "space-between",
-                  alignItems: "center",
-                  marginBottom: 10,
+                  alignItems: isMobileAdmin ? "stretch" : "center",
                   gap: 10,
+                  marginBottom: 14,
+                  flexDirection: isMobileAdmin ? "column" : "row",
                 }}
               >
-                <div style={{ fontSize: 18, fontWeight: 800 }}>파일 목록</div>
-                <button
-                  onClick={fetchFiles}
-                  style={{
-                    padding: "8px 10px",
-                    borderRadius: 10,
-                    border: "1px solid #ddd",
-                    background: "#fff",
-                    cursor: "pointer",
-                    fontWeight: 700,
-                  }}
-                >
-                  새로고침
+                <div>
+                  <div style={{ fontSize: 20, fontWeight: 900, color: "#0f172a" }}>파일 목록</div>
+                  <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>
+                    버킷 루트에 확인된 엑셀 파일과 메타 상태를 함께 표시합니다.
+                  </div>
+                </div>
+                <button onClick={fetchFiles} style={{ ...ghostButton, width: isMobileAdmin ? "100%" : "auto" }}>
+                  {loadingFiles ? "불러오는 중..." : "새로고침"}
                 </button>
               </div>
 
-              <div style={{ fontSize: 13, color: "#666", marginBottom: 10 }}>
-                버킷에 존재하는 엑셀 파일을 기준으로 작업자에게 지정합니다.
-              </div>
-
-              <div style={{ maxHeight: 420, overflowY: "auto", border: "1px solid #eee", borderRadius: 12 }}>
+              <div style={{ display: "grid", gap: 10, maxHeight: isMobileAdmin ? "none" : 460, overflowY: "auto", paddingRight: 2 }}>
                 {loadingFiles ? (
-                  <div style={{ padding: 16, color: "#666" }}>불러오는 중...</div>
+                  <div style={{ padding: 16, color: "#64748b" }}>불러오는 중...</div>
                 ) : dedupedFiles.length === 0 ? (
-                  <div style={{ padding: 16, color: "#666" }}>업로드된 파일이 없습니다.</div>
+                  <div style={{ padding: 16, color: "#64748b" }}>업로드된 파일이 없습니다.</div>
                 ) : (
                   dedupedFiles.map((f) => {
-                    const status = String(f?.status ?? "").trim().toLowerCase();
-                    const percent = getFileProgressPercent(f, status === FILE_STATUS_READY ? 100 : 0);
+                    const statusMeta = getFileStatusMeta(f);
+                    const percent = getFileProgressPercent(
+                      f,
+                      String(f?.status ?? "").trim().toLowerCase() === FILE_STATUS_READY || f?.source === "bucket" ? 100 : 0
+                    );
                     return (
                       <div
                         key={f.id || f.file_name}
                         style={{
-                          padding: 12,
-                          borderBottom: "1px solid #f1f5f9",
-                          background:
-                            status === FILE_STATUS_FAILED
-                              ? "#fff5f5"
-                              : status === FILE_STATUS_READY
-                              ? "#f0fdf4"
-                              : "#fff",
+                          borderRadius: 18,
+                          padding: 14,
+                          border: `1px solid ${statusMeta.border}`,
+                          background: "linear-gradient(180deg, rgba(255,255,255,0.95) 0%, rgba(248,250,252,0.96) 100%)",
+                          boxShadow: "0 10px 24px rgba(15,23,42,0.05)",
                         }}
                       >
-                        <div style={{ fontWeight: 800, fontSize: 14, wordBreak: "break-all" }}>
-                          {f.file_name}
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <div style={{ fontWeight: 800, fontSize: 14, color: "#0f172a", wordBreak: "break-all" }}>
+                              {f.file_name}
+                            </div>
+                            <div style={{ marginTop: 6, fontSize: 12, color: "#64748b", wordBreak: "break-all" }}>
+                              원본명: {f.original_name || f.file_name}
+                            </div>
+                          </div>
+                          <div
+                            style={{
+                              padding: "7px 10px",
+                              borderRadius: 999,
+                              background: statusMeta.chipBg,
+                              color: statusMeta.chipColor,
+                              fontSize: 12,
+                              fontWeight: 800,
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {statusMeta.label}
+                          </div>
                         </div>
-                        <div style={{ fontSize: 12, color: "#555", marginTop: 4, wordBreak: "break-all" }}>
-                          원본명: {f.original_name || f.file_name}
+
+                        <div style={{ marginTop: 12, height: 10, borderRadius: 999, background: "rgba(148,163,184,0.16)", overflow: "hidden" }}>
+                          <div
+                            style={{
+                              width: `${Math.max(0, Math.min(100, percent))}%`,
+                              height: "100%",
+                              borderRadius: 999,
+                              background:
+                                String(f?.status ?? "").trim().toLowerCase() === FILE_STATUS_FAILED
+                                  ? "linear-gradient(135deg, #ef4444 0%, #dc2626 100%)"
+                                  : "linear-gradient(135deg, #2563eb 0%, #60a5fa 100%)",
+                            }}
+                          />
                         </div>
-                        <div style={{ fontSize: 12, color: "#555", marginTop: 4 }}>
-                          상태: <b>{f.status}</b> · 진행률: <b>{percent}%</b>
-                        </div>
-                        <div style={{ fontSize: 12, color: "#555", marginTop: 4, whiteSpace: "pre-wrap" }}>
-                          진행내용: {f.progress_message || "-"}
+
+                        <div style={{ marginTop: 10, fontSize: 12, color: "#334155", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
+                          진행률 <b>{percent}%</b> · {f.progress_message || "-"}
                         </div>
                         {f.error_message ? (
-                          <div style={{ fontSize: 12, color: "#b91c1c", marginTop: 4, whiteSpace: "pre-wrap" }}>
+                          <div style={{ marginTop: 8, fontSize: 12, color: "#b91c1c", whiteSpace: "pre-wrap" }}>
                             오류: {f.error_message}
                           </div>
                         ) : null}
@@ -771,125 +961,213 @@ function AdminPage({ currentUser, onBack }) {
             </div>
           </div>
 
-          <div
-            style={{
-              background: "#fff",
-              borderRadius: 16,
-              border: "1px solid #e5e7eb",
-              boxShadow: "0 6px 24px rgba(0,0,0,0.05)",
-              padding: 16,
-            }}
-          >
+          <div style={{ ...cardStyle, padding: isMobileAdmin ? 16 : 20, overflow: "hidden" }}>
             <div
               style={{
                 display: "flex",
                 justifyContent: "space-between",
-                alignItems: "center",
+                alignItems: isMobileAdmin ? "stretch" : "center",
                 gap: 12,
-                flexWrap: "wrap",
-                marginBottom: 12,
+                flexDirection: isMobileAdmin ? "column" : "row",
+                marginBottom: 14,
               }}
             >
-              <div style={{ fontSize: 18, fontWeight: 800 }}>사용자 관리</div>
+              <div>
+                <div style={{ fontSize: 20, fontWeight: 900, color: "#0f172a" }}>사용자 관리</div>
+                <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>
+                  아이디, 역할, 권역, 조, 현재파일과 파일배정을 모바일 카드/데스크탑 표로 제공합니다.
+                </div>
+              </div>
 
-              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <div style={{ display: "flex", gap: 8, width: isMobileAdmin ? "100%" : "auto", flexDirection: isMobileAdmin ? "column" : "row" }}>
                 <input
                   value={searchText}
                   onChange={(e) => setSearchText(e.target.value)}
                   placeholder="아이디 / 역할 / 권역 / 조 / 파일 검색"
                   style={{
-                    padding: "10px 12px",
-                    borderRadius: 10,
-                    border: "1px solid #d1d5db",
-                    minWidth: 260,
+                    padding: "12px 14px",
+                    borderRadius: 14,
+                    border: "1px solid rgba(148,163,184,0.28)",
+                    minWidth: isMobileAdmin ? "100%" : 280,
+                    width: isMobileAdmin ? "100%" : 320,
+                    background: "rgba(255,255,255,0.9)",
+                    boxSizing: "border-box",
+                    outline: "none",
                   }}
                 />
-                <button
-                  onClick={fetchUsers}
-                  style={{
-                    padding: "10px 12px",
-                    borderRadius: 10,
-                    border: "1px solid #ddd",
-                    background: "#fff",
-                    cursor: "pointer",
-                    fontWeight: 700,
-                  }}
-                >
-                  새로고침
+                <button onClick={fetchUsers} style={{ ...ghostButton, width: isMobileAdmin ? "100%" : "auto" }}>
+                  {loadingUsers ? "불러오는 중..." : "새로고침"}
                 </button>
               </div>
             </div>
 
-            <div style={{ overflowX: "auto", border: "1px solid #eee", borderRadius: 12 }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 880 }}>
-                <thead>
-                  <tr style={{ background: "#f8fafc" }}>
-                    {["아이디", "역할", "권역", "조", "현재파일", "파일배정"].map((h) => (
-                      <th
-                        key={h}
+            {isMobileAdmin ? (
+              <div style={{ display: "grid", gap: 12 }}>
+                {loadingUsers ? (
+                  <div style={{ padding: 16, color: "#64748b" }}>불러오는 중...</div>
+                ) : filteredUsers.length === 0 ? (
+                  <div style={{ padding: 16, color: "#64748b" }}>조회된 사용자가 없습니다.</div>
+                ) : (
+                  filteredUsers.map((row) => (
+                    <div
+                      key={row.id}
+                      style={{
+                        borderRadius: 18,
+                        padding: 14,
+                        border: "1px solid rgba(148,163,184,0.16)",
+                        background: "linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(248,250,252,0.96) 100%)",
+                        boxShadow: "0 10px 24px rgba(15,23,42,0.05)",
+                      }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", marginBottom: 10 }}>
+                        <div>
+                          <div style={{ fontWeight: 900, fontSize: 16, color: "#0f172a" }}>{row.id}</div>
+                          <div style={{ marginTop: 4, fontSize: 12, color: "#64748b" }}>{row.worker_type || USER_ROLE.MODEM}</div>
+                        </div>
+                        <button onClick={() => openEdit(row)} style={{ ...ghostButton, padding: "9px 12px" }}>
+                          상세 편집
+                        </button>
+                      </div>
+
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10, marginBottom: 12 }}>
+                        <div style={{ padding: 12, borderRadius: 14, background: "rgba(15,23,42,0.04)" }}>
+                          <div style={{ fontSize: 11, color: "#64748b", marginBottom: 4 }}>권역</div>
+                          <div style={{ fontWeight: 800, color: "#0f172a" }}>{row.category ?? "-"}</div>
+                        </div>
+                        <div style={{ padding: 12, borderRadius: 14, background: "rgba(15,23,42,0.04)" }}>
+                          <div style={{ fontSize: 11, color: "#64748b", marginBottom: 4 }}>조</div>
+                          <div style={{ fontWeight: 800, color: "#0f172a" }}>{row.Group ?? row.group ?? "-"}</div>
+                        </div>
+                      </div>
+
+                      <div style={{ fontSize: 11, color: "#64748b", marginBottom: 4 }}>현재파일</div>
+                      <div
                         style={{
-                          textAlign: "left",
-                          padding: "12px 10px",
-                          borderBottom: "1px solid #e5e7eb",
-                          fontSize: 13,
+                          padding: "12px 12px",
+                          borderRadius: 14,
+                          border: "1px solid rgba(148,163,184,0.18)",
+                          background: "rgba(255,255,255,0.86)",
+                          fontWeight: 700,
+                          color: "#0f172a",
+                          wordBreak: "break-all",
+                          marginBottom: 12,
                         }}
                       >
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {loadingUsers ? (
-                    <tr>
-                      <td colSpan={6} style={{ padding: 16, color: "#666" }}>
-                        불러오는 중...
-                      </td>
+                        {row.data_file || "EMPTY"}
+                      </div>
+
+                      <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6 }}>파일배정</div>
+                      <select
+                        value={row.data_file || "EMPTY"}
+                        onChange={(e) => assignFileQuickly(row.id, e.target.value)}
+                        style={{
+                          width: "100%",
+                          padding: "12px 12px",
+                          borderRadius: 14,
+                          border: "1px solid rgba(148,163,184,0.24)",
+                          background: "white",
+                        }}
+                      >
+                        <option value="EMPTY">EMPTY</option>
+                        {readyFiles.map((f) => (
+                          <option key={f.file_name} value={f.file_name}>
+                            {f.file_name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ))
+                )}
+              </div>
+            ) : (
+              <div style={{ overflowX: "auto", border: "1px solid rgba(148,163,184,0.16)", borderRadius: 18 }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 900 }}>
+                  <thead>
+                    <tr style={{ background: "linear-gradient(180deg, rgba(248,250,252,1) 0%, rgba(241,245,249,1) 100%)" }}>
+                      {["아이디", "역할", "권역", "조", "현재파일", "파일배정"].map((h) => (
+                        <th
+                          key={h}
+                          style={{
+                            textAlign: "left",
+                            padding: "14px 12px",
+                            borderBottom: "1px solid rgba(148,163,184,0.18)",
+                            fontSize: 13,
+                            color: "#334155",
+                          }}
+                        >
+                          {h}
+                        </th>
+                      ))}
                     </tr>
-                  ) : filteredUsers.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} style={{ padding: 16, color: "#666" }}>
-                        조회된 사용자가 없습니다.
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredUsers.map((row) => (
-                      <tr key={row.id} onClick={() => openEdit(row)} style={{ cursor: "pointer" }}>
-                        <td style={{ padding: "12px 10px", borderBottom: "1px solid #f1f5f9" }}>{row.id}</td>
-                        <td style={{ padding: "12px 10px", borderBottom: "1px solid #f1f5f9" }}>{row.worker_type || USER_ROLE.MODEM}</td>
-                        <td style={{ padding: "12px 10px", borderBottom: "1px solid #f1f5f9" }}>{row.category ?? "-"}</td>
-                        <td style={{ padding: "12px 10px", borderBottom: "1px solid #f1f5f9" }}>{row.Group ?? row.group ?? "-"}</td>
-                        <td style={{ padding: "12px 10px", borderBottom: "1px solid #f1f5f9", wordBreak: "break-all" }}>
-                          {row.data_file || "EMPTY"}
-                        </td>
-                        <td style={{ padding: "12px 10px", borderBottom: "1px solid #f1f5f9" }} onClick={(e) => e.stopPropagation()}>
-                          <select
-                            value={row.data_file || "EMPTY"}
-                            onChange={(e) => assignFileQuickly(row.id, e.target.value)}
-                            style={{
-                              width: 220,
-                              maxWidth: "100%",
-                              padding: "9px 10px",
-                              borderRadius: 10,
-                              border: "1px solid #d1d5db",
-                            }}
-                          >
-                            <option value="EMPTY">EMPTY</option>
-                            {readyFiles.map((f) => (
-                              <option key={f.file_name} value={f.file_name}>
-                                {f.file_name}
-                              </option>
-                            ))}
-                          </select>
+                  </thead>
+                  <tbody>
+                    {loadingUsers ? (
+                      <tr>
+                        <td colSpan={6} style={{ padding: 18, color: "#64748b" }}>
+                          불러오는 중...
                         </td>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-            <div style={{ fontSize: 12, color: "#666", marginTop: 8 }}>
-              사용자 행을 클릭하면 상세 편집창이 열립니다.
+                    ) : filteredUsers.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} style={{ padding: 18, color: "#64748b" }}>
+                          조회된 사용자가 없습니다.
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredUsers.map((row) => (
+                        <tr
+                          key={row.id}
+                          onClick={() => openEdit(row)}
+                          style={{
+                            cursor: "pointer",
+                            transition: "background 0.2s ease",
+                          }}
+                          onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(37,99,235,0.035)")}
+                          onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                        >
+                          <td style={{ padding: "14px 12px", borderBottom: "1px solid rgba(241,245,249,1)", fontWeight: 700 }}>{row.id}</td>
+                          <td style={{ padding: "14px 12px", borderBottom: "1px solid rgba(241,245,249,1)" }}>{row.worker_type || USER_ROLE.MODEM}</td>
+                          <td style={{ padding: "14px 12px", borderBottom: "1px solid rgba(241,245,249,1)" }}>{row.category ?? "-"}</td>
+                          <td style={{ padding: "14px 12px", borderBottom: "1px solid rgba(241,245,249,1)" }}>{row.Group ?? row.group ?? "-"}</td>
+                          <td style={{ padding: "14px 12px", borderBottom: "1px solid rgba(241,245,249,1)", wordBreak: "break-all" }}>
+                            {row.data_file || "EMPTY"}
+                          </td>
+                          <td
+                            style={{ padding: "14px 12px", borderBottom: "1px solid rgba(241,245,249,1)" }}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <select
+                              value={row.data_file || "EMPTY"}
+                              onChange={(e) => assignFileQuickly(row.id, e.target.value)}
+                              style={{
+                                width: 240,
+                                maxWidth: "100%",
+                                padding: "10px 12px",
+                                borderRadius: 12,
+                                border: "1px solid rgba(148,163,184,0.24)",
+                                background: "white",
+                              }}
+                            >
+                              <option value="EMPTY">EMPTY</option>
+                              {readyFiles.map((f) => (
+                                <option key={f.file_name} value={f.file_name}>
+                                  {f.file_name}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div style={{ fontSize: 12, color: "#64748b", marginTop: 10 }}>
+              {isMobileAdmin
+                ? "모바일에서는 카드 형식으로 배정과 상세 편집을 쉽게 할 수 있습니다."
+                : "사용자 행을 클릭하면 상세 편집창이 열립니다."}
             </div>
           </div>
         </div>
@@ -900,54 +1178,65 @@ function AdminPage({ currentUser, onBack }) {
           style={{
             position: "fixed",
             inset: 0,
-            background: "rgba(0,0,0,0.35)",
+            background: "rgba(15,23,42,0.42)",
+            backdropFilter: "blur(6px)",
             zIndex: 1000001,
             display: "flex",
-            alignItems: "center",
+            alignItems: isMobileAdmin ? "flex-end" : "center",
             justifyContent: "center",
-            padding: 16,
+            padding: isMobileAdmin ? 0 : 18,
           }}
           onClick={() => setEditing(null)}
         >
           <div
             style={{
               width: "100%",
-              maxWidth: 520,
-              background: "white",
-              borderRadius: 18,
-              padding: 18,
-              boxShadow: "0 20px 60px rgba(0,0,0,0.2)",
+              maxWidth: 560,
+              background: "linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(248,250,252,0.98) 100%)",
+              borderRadius: isMobileAdmin ? "22px 22px 0 0" : 24,
+              padding: isMobileAdmin ? 18 : 20,
+              boxShadow: "0 30px 80px rgba(15,23,42,0.18)",
+              maxHeight: isMobileAdmin ? "88vh" : "90vh",
+              overflowY: "auto",
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 14 }}>사용자 편집</div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 16 }}>
+              <div>
+                <div style={{ fontSize: 22, fontWeight: 900, color: "#0f172a" }}>사용자 편집</div>
+                <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>
+                  역할, 권역, 조, 파일배정 정보를 수정할 수 있습니다.
+                </div>
+              </div>
+              <button onClick={() => setEditing(null)} style={{ ...ghostButton, padding: "8px 10px" }}>닫기</button>
+            </div>
 
             <div style={{ display: "grid", gap: 12 }}>
               <label style={{ display: "grid", gap: 6 }}>
-                <span style={{ fontSize: 13, fontWeight: 700 }}>아이디</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: "#334155" }}>아이디</span>
                 <input
                   value={editing.id}
                   onChange={(e) => setEditing((prev) => ({ ...prev, id: e.target.value }))}
-                  style={{ padding: "11px 12px", borderRadius: 10, border: "1px solid #d1d5db" }}
+                  style={{ padding: "12px 13px", borderRadius: 12, border: "1px solid rgba(148,163,184,0.28)", background: "white" }}
                 />
               </label>
 
               <label style={{ display: "grid", gap: 6 }}>
-                <span style={{ fontSize: 13, fontWeight: 700 }}>비밀번호</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: "#334155" }}>비밀번호</span>
                 <input
                   value={editing.password}
                   onChange={(e) => setEditing((prev) => ({ ...prev, password: e.target.value }))}
-                  style={{ padding: "11px 12px", borderRadius: 10, border: "1px solid #d1d5db" }}
+                  style={{ padding: "12px 13px", borderRadius: 12, border: "1px solid rgba(148,163,184,0.28)", background: "white" }}
                 />
               </label>
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div style={{ display: "grid", gridTemplateColumns: isMobileAdmin ? "1fr" : "1fr 1fr", gap: 12 }}>
                 <label style={{ display: "grid", gap: 6 }}>
-                  <span style={{ fontSize: 13, fontWeight: 700 }}>역할</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: "#334155" }}>역할</span>
                   <select
                     value={editing.worker_type}
                     onChange={(e) => setEditing((prev) => ({ ...prev, worker_type: e.target.value }))}
-                    style={{ padding: "11px 12px", borderRadius: 10, border: "1px solid #d1d5db" }}
+                    style={{ padding: "12px 13px", borderRadius: 12, border: "1px solid rgba(148,163,184,0.28)", background: "white" }}
                   >
                     <option value={USER_ROLE.MODEM}>{USER_ROLE.MODEM}</option>
                     <option value={USER_ROLE.METER}>{USER_ROLE.METER}</option>
@@ -955,7 +1244,7 @@ function AdminPage({ currentUser, onBack }) {
                 </label>
 
                 <label style={{ display: "grid", gap: 6 }}>
-                  <span style={{ fontSize: 13, fontWeight: 700 }}>조회권한</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: "#334155" }}>조회권한</span>
                   <select
                     value={editing.can_view_others ? "true" : "false"}
                     onChange={(e) =>
@@ -964,7 +1253,7 @@ function AdminPage({ currentUser, onBack }) {
                         can_view_others: e.target.value === "true",
                       }))
                     }
-                    style={{ padding: "11px 12px", borderRadius: 10, border: "1px solid #d1d5db" }}
+                    style={{ padding: "12px 13px", borderRadius: 12, border: "1px solid rgba(148,163,184,0.28)", background: "white" }}
                   >
                     <option value="false">FALSE</option>
                     <option value="true">TRUE</option>
@@ -972,32 +1261,32 @@ function AdminPage({ currentUser, onBack }) {
                 </label>
               </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div style={{ display: "grid", gridTemplateColumns: isMobileAdmin ? "1fr" : "1fr 1fr", gap: 12 }}>
                 <label style={{ display: "grid", gap: 6 }}>
-                  <span style={{ fontSize: 13, fontWeight: 700 }}>권역</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: "#334155" }}>권역</span>
                   <input
                     value={editing.category}
                     onChange={(e) => setEditing((prev) => ({ ...prev, category: e.target.value }))}
-                    style={{ padding: "11px 12px", borderRadius: 10, border: "1px solid #d1d5db" }}
+                    style={{ padding: "12px 13px", borderRadius: 12, border: "1px solid rgba(148,163,184,0.28)", background: "white" }}
                   />
                 </label>
 
                 <label style={{ display: "grid", gap: 6 }}>
-                  <span style={{ fontSize: 13, fontWeight: 700 }}>조</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: "#334155" }}>조</span>
                   <input
                     value={editing.Group}
                     onChange={(e) => setEditing((prev) => ({ ...prev, Group: e.target.value }))}
-                    style={{ padding: "11px 12px", borderRadius: 10, border: "1px solid #d1d5db" }}
+                    style={{ padding: "12px 13px", borderRadius: 12, border: "1px solid rgba(148,163,184,0.28)", background: "white" }}
                   />
                 </label>
               </div>
 
               <label style={{ display: "grid", gap: 6 }}>
-                <span style={{ fontSize: 13, fontWeight: 700 }}>파일 배정</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: "#334155" }}>파일 배정</span>
                 <select
                   value={editing.data_file || "EMPTY"}
                   onChange={(e) => setEditing((prev) => ({ ...prev, data_file: e.target.value }))}
-                  style={{ padding: "11px 12px", borderRadius: 10, border: "1px solid #d1d5db" }}
+                  style={{ padding: "12px 13px", borderRadius: 12, border: "1px solid rgba(148,163,184,0.28)", background: "white" }}
                 >
                   <option value="EMPTY">EMPTY</option>
                   {readyFiles.map((f) => (
@@ -1009,31 +1298,21 @@ function AdminPage({ currentUser, onBack }) {
               </label>
             </div>
 
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}>
-              <button
-                onClick={() => setEditing(null)}
-                style={{
-                  padding: "10px 14px",
-                  borderRadius: 10,
-                  border: "1px solid #d1d5db",
-                  background: "white",
-                  cursor: "pointer",
-                  fontWeight: 700,
-                }}
-              >
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18, flexDirection: isMobileAdmin ? "column-reverse" : "row" }}>
+              <button onClick={() => setEditing(null)} style={{ ...ghostButton, width: isMobileAdmin ? "100%" : "auto" }}>
                 취소
               </button>
               <button
                 onClick={saveUser}
                 disabled={savingUserId === editing.originalId}
                 style={{
-                  padding: "10px 14px",
-                  borderRadius: 10,
-                  border: "none",
-                  background: "#2563eb",
-                  color: "white",
-                  cursor: savingUserId === editing.originalId ? "default" : "pointer",
-                  fontWeight: 800,
+                  ...primaryButton,
+                  width: isMobileAdmin ? "100%" : 140,
+                  background:
+                    savingUserId === editing.originalId
+                      ? "linear-gradient(135deg, #94a3b8 0%, #64748b 100%)"
+                      : "linear-gradient(135deg, #0f172a 0%, #2563eb 100%)",
+                  boxShadow: savingUserId === editing.originalId ? "none" : "0 16px 28px rgba(37,99,235,0.18)",
                 }}
               >
                 {savingUserId === editing.originalId ? "저장 중..." : "저장"}
@@ -1048,61 +1327,56 @@ function AdminPage({ currentUser, onBack }) {
           style={{
             position: "fixed",
             inset: 0,
-            background: "rgba(0,0,0,0.35)",
+            background: "rgba(15,23,42,0.42)",
+            backdropFilter: "blur(6px)",
             zIndex: 1000002,
             display: "flex",
-            alignItems: "center",
+            alignItems: isMobileAdmin ? "flex-end" : "center",
             justifyContent: "center",
-            padding: 16,
+            padding: isMobileAdmin ? 0 : 18,
           }}
           onClick={closeUploadProgress}
         >
           <div
             style={{
               width: "100%",
-              maxWidth: 440,
-              background: "#fff",
-              borderRadius: 18,
-              padding: 18,
-              boxShadow: "0 20px 60px rgba(0,0,0,0.2)",
+              maxWidth: 480,
+              background: "linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(248,250,252,0.98) 100%)",
+              borderRadius: isMobileAdmin ? "22px 22px 0 0" : 24,
+              padding: isMobileAdmin ? 18 : 20,
+              boxShadow: "0 30px 80px rgba(15,23,42,0.18)",
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 8 }}>업로드 진행상황</div>
-            <div style={{ fontSize: 13, color: "#666", wordBreak: "break-all", marginBottom: 12 }}>
+            <div style={{ fontSize: 22, fontWeight: 900, marginBottom: 8, color: "#0f172a" }}>업로드 진행상황</div>
+            <div style={{ fontSize: 13, color: "#64748b", wordBreak: "break-all", marginBottom: 14 }}>
               파일: {uploadProgress.fileName || "-"}
             </div>
-            <div
-              style={{
-                height: 14,
-                borderRadius: 999,
-                background: "#e5e7eb",
-                overflow: "hidden",
-                marginBottom: 10,
-              }}
-            >
+            <div style={{ height: 14, borderRadius: 999, background: "rgba(148,163,184,0.18)", overflow: "hidden", marginBottom: 10 }}>
               <div
                 style={{
                   width: `${Math.max(0, Math.min(100, uploadProgress.percent || 0))}%`,
                   height: "100%",
                   background:
-                    uploadProgress.status === FILE_STATUS_FAILED ? "#dc2626" : "#2563eb",
+                    uploadProgress.status === FILE_STATUS_FAILED
+                      ? "linear-gradient(135deg, #ef4444 0%, #dc2626 100%)"
+                      : "linear-gradient(135deg, #2563eb 0%, #60a5fa 100%)",
                   transition: "width 0.35s ease",
                 }}
               />
             </div>
-            <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 6 }}>
+            <div style={{ fontSize: 24, fontWeight: 900, marginBottom: 8, color: "#0f172a" }}>
               {Math.max(0, Math.min(100, uploadProgress.percent || 0))}%
             </div>
-            <div style={{ fontSize: 13, color: "#444", whiteSpace: "pre-wrap" }}>
+            <div style={{ fontSize: 13, color: "#334155", whiteSpace: "pre-wrap", lineHeight: 1.7 }}>
               {uploadProgress.message || "처리 중..."}
             </div>
             {uploadProgress.error ? (
-              <div style={{ fontSize: 12, color: "#b91c1c", marginTop: 8, whiteSpace: "pre-wrap" }}>
+              <div style={{ fontSize: 12, color: "#b91c1c", marginTop: 10, whiteSpace: "pre-wrap", lineHeight: 1.6 }}>
                 오류: {uploadProgress.error}
               </div>
             ) : null}
-            <div style={{ fontSize: 12, color: "#666", marginTop: 10 }}>
+            <div style={{ fontSize: 12, color: "#64748b", marginTop: 12 }}>
               % 값은 원본 업로드 + 서버 가공 전체 단계를 기준으로 표시됩니다.
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
@@ -1110,13 +1384,10 @@ function AdminPage({ currentUser, onBack }) {
                 onClick={closeUploadProgress}
                 disabled={uploading}
                 style={{
-                  padding: "10px 14px",
-                  borderRadius: 10,
-                  border: "1px solid #d1d5db",
-                  background: "white",
+                  ...ghostButton,
+                  width: isMobileAdmin ? "100%" : 120,
+                  opacity: uploading ? 0.55 : 1,
                   cursor: uploading ? "default" : "pointer",
-                  fontWeight: 700,
-                  opacity: uploading ? 0.5 : 1,
                 }}
               >
                 확인
