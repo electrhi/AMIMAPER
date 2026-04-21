@@ -139,10 +139,740 @@ const chunkArray = (arr, size = 500) => {
 
 
 
+
+
+const FILE_STATUS_READY = "ready";
+
+const toBool = (v) => {
+  if (v === true || v === false) return v;
+  const s = String(v ?? "").trim().toLowerCase();
+  return s === "true" || s === "1" || s === "y" || s === "yes";
+};
+
+const sanitizeFileName = (name) => {
+  const clean = String(name ?? "")
+    .trim()
+    .replace(/[^\w.\-가-힣]+/g, "_");
+  return clean || `upload_${Date.now()}.xlsx`;
+};
+
+function AdminPage({ currentUser, onBack }) {
+  const [users, setUsers] = useState([]);
+  const [files, setFiles] = useState([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [loadingFiles, setLoadingFiles] = useState(false);
+  const [savingUserId, setSavingUserId] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [editing, setEditing] = useState(null);
+  const [searchText, setSearchText] = useState("");
+
+  const readyFiles = React.useMemo(
+    () => files.filter((f) => String(f?.status ?? "") === FILE_STATUS_READY),
+    [files]
+  );
+
+  const filteredUsers = React.useMemo(() => {
+    const q = String(searchText ?? "").trim().toLowerCase();
+    if (!q) return users;
+
+    return users.filter((u) => {
+      return [
+        u?.id,
+        u?.worker_type,
+        u?.data_file,
+        String(u?.category ?? ""),
+        String(u?.Group ?? u?.group ?? ""),
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(q);
+    });
+  }, [users, searchText]);
+
+  const fetchUsers = async () => {
+    setLoadingUsers(true);
+    try {
+      const { data, error } = await supabase
+        .from("users")
+        .select("*")
+        .neq("worker_type", "관리자")
+        .order("id", { ascending: true });
+
+      if (error) throw error;
+      setUsers(data || []);
+    } catch (err) {
+      console.error("[ADMIN][USERS] fetch 실패:", err.message);
+      alert(`사용자 목록 조회 실패: ${err.message}`);
+    } finally {
+      setLoadingUsers(false);
+    }
+  };
+
+  const fetchFiles = async () => {
+    setLoadingFiles(true);
+    try {
+      const { data, error } = await supabase
+        .from("excel_files")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+      setFiles(data || []);
+    } catch (err) {
+      console.error("[ADMIN][FILES] fetch 실패:", err.message);
+      alert(`파일 목록 조회 실패: ${err.message}`);
+    } finally {
+      setLoadingFiles(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchUsers();
+    fetchFiles();
+  }, []);
+
+  const openEdit = (row) => {
+    setEditing({
+      originalId: row.id,
+      id: row.id ?? "",
+      password: row.password ?? "",
+      data_file: row.data_file ?? "",
+      can_view_others: toBool(row.can_view_others),
+      category: row.category ?? "",
+      Group: row.Group ?? row.group ?? "",
+      worker_type: row.worker_type ?? USER_ROLE.MODEM,
+    });
+  };
+
+  const saveUser = async () => {
+    if (!editing?.originalId) return;
+
+    const nextId = String(editing.id ?? "").trim();
+    if (!nextId) {
+      alert("아이디는 비워둘 수 없습니다.");
+      return;
+    }
+
+    setSavingUserId(editing.originalId);
+    try {
+      const payload = {
+        id: nextId,
+        password: String(editing.password ?? "").trim(),
+        data_file: String(editing.data_file ?? "").trim() || "EMPTY",
+        can_view_others: !!editing.can_view_others,
+        category:
+          editing.category === "" || editing.category == null
+            ? null
+            : Number(editing.category),
+        Group:
+          editing.Group === "" || editing.Group == null
+            ? null
+            : Number(editing.Group),
+        worker_type: String(editing.worker_type ?? "").trim() || USER_ROLE.MODEM,
+      };
+
+      const { error } = await supabase
+        .from("users")
+        .update(payload)
+        .eq("id", editing.originalId);
+
+      if (error) throw error;
+
+      await fetchUsers();
+      setEditing(null);
+      alert("사용자 정보가 저장되었습니다.");
+    } catch (err) {
+      console.error("[ADMIN][USERS] save 실패:", err.message);
+      alert(`사용자 저장 실패: ${err.message}`);
+    } finally {
+      setSavingUserId(null);
+    }
+  };
+
+  const assignFileQuickly = async (userId, fileName) => {
+    try {
+      const { error } = await supabase
+        .from("users")
+        .update({ data_file: fileName || "EMPTY" })
+        .eq("id", userId);
+
+      if (error) throw error;
+      await fetchUsers();
+    } catch (err) {
+      console.error("[ADMIN][ASSIGN] 실패:", err.message);
+      alert(`파일 배정 실패: ${err.message}`);
+    }
+  };
+
+  const handleUpload = async () => {
+    if (!selectedFile) {
+      alert("업로드할 엑셀 파일을 선택해주세요.");
+      return;
+    }
+
+    if (!currentUser?.id) {
+      alert("관리자 정보가 없습니다. 다시 로그인해주세요.");
+      return;
+    }
+
+    setUploading(true);
+    try {
+      const safeOriginalName = sanitizeFileName(selectedFile.name);
+      const finalFileName = `${Date.now()}_${safeOriginalName}`;
+      const incomingPath = `incoming/${finalFileName}`;
+
+      const { error: storageError } = await supabase.storage
+        .from("excels")
+        .upload(incomingPath, selectedFile, {
+          cacheControl: "3600",
+          upsert: true,
+          contentType:
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        });
+
+      if (storageError) throw storageError;
+
+      const { error: metaError } = await supabase.from("excel_files").upsert(
+        {
+          file_name: finalFileName,
+          original_name: selectedFile.name,
+          storage_path: incomingPath,
+          status: "uploaded",
+          uploaded_by: currentUser.id,
+          error_message: null,
+        },
+        { onConflict: "file_name" }
+      );
+
+      if (metaError) throw metaError;
+
+      const { data, error: invokeError } = await supabase.functions.invoke(
+        "process-excel-upload",
+        {
+          body: {
+            storagePath: incomingPath,
+            fileName: finalFileName,
+            originalName: selectedFile.name,
+            uploadedBy: currentUser.id,
+          },
+        }
+      );
+
+      if (invokeError) throw invokeError;
+      if (data?.success !== true) {
+        throw new Error(data?.error || "엣지 함수 처리 실패");
+      }
+
+      setSelectedFile(null);
+      const input = document.getElementById("admin-upload-input");
+      if (input) input.value = "";
+
+      await fetchFiles();
+      alert("업로드 및 가공이 완료되었습니다.");
+    } catch (err) {
+      console.error("[ADMIN][UPLOAD] 실패:", err.message);
+      alert(`엑셀 업로드 실패: ${err.message}`);
+      await fetchFiles();
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        background: "#f5f7fb",
+        padding: 16,
+        boxSizing: "border-box",
+      }}
+    >
+      <div style={{ maxWidth: 1280, margin: "0 auto" }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 12,
+            marginBottom: 16,
+            flexWrap: "wrap",
+          }}
+        >
+          <div>
+            <div style={{ fontSize: 24, fontWeight: 800, color: "#222" }}>
+              관리자 페이지
+            </div>
+            <div style={{ fontSize: 13, color: "#666", marginTop: 4 }}>
+              사용자 관리 / 엑셀 업로드 / data_file 배정
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <div
+              style={{
+                padding: "8px 12px",
+                borderRadius: 999,
+                background: "#fff",
+                border: "1px solid #ddd",
+                fontSize: 13,
+                fontWeight: 700,
+              }}
+            >
+              관리자: {currentUser?.id || "-"}
+            </div>
+
+            <button
+              onClick={onBack}
+              style={{
+                padding: "10px 14px",
+                borderRadius: 10,
+                border: "1px solid #ddd",
+                background: "#fff",
+                cursor: "pointer",
+                fontWeight: 800,
+              }}
+            >
+              지도으로 돌아가기
+            </button>
+          </div>
+        </div>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "minmax(340px, 420px) minmax(0, 1fr)",
+            gap: 16,
+          }}
+        >
+          <div style={{ display: "grid", gap: 16 }}>
+            <div
+              style={{
+                background: "#fff",
+                borderRadius: 16,
+                border: "1px solid #e5e7eb",
+                boxShadow: "0 6px 24px rgba(0,0,0,0.05)",
+                padding: 16,
+              }}
+            >
+              <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 10 }}>
+                엑셀 업로드
+              </div>
+
+              <input
+                id="admin-upload-input"
+                type="file"
+                accept=".xlsx"
+                onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+                style={{ width: "100%", marginBottom: 12 }}
+              />
+
+              <div style={{ fontSize: 13, color: "#666", lineHeight: 1.5, marginBottom: 12 }}>
+                업로드 후 Edge Function이 도로명주소/건물명/lat/lng 및 geoCache를 생성합니다.
+              </div>
+
+              <button
+                onClick={handleUpload}
+                disabled={uploading}
+                style={{
+                  width: "100%",
+                  padding: "12px 14px",
+                  borderRadius: 12,
+                  border: "none",
+                  background: uploading ? "#94a3b8" : "#2563eb",
+                  color: "white",
+                  cursor: uploading ? "default" : "pointer",
+                  fontWeight: 800,
+                }}
+              >
+                {uploading ? "업로드 처리 중..." : "엑셀 업로드"}
+              </button>
+            </div>
+
+            <div
+              style={{
+                background: "#fff",
+                borderRadius: 16,
+                border: "1px solid #e5e7eb",
+                boxShadow: "0 6px 24px rgba(0,0,0,0.05)",
+                padding: 16,
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: 10,
+                  gap: 10,
+                }}
+              >
+                <div style={{ fontSize: 18, fontWeight: 800 }}>파일 목록</div>
+                <button
+                  onClick={fetchFiles}
+                  style={{
+                    padding: "8px 10px",
+                    borderRadius: 10,
+                    border: "1px solid #ddd",
+                    background: "#fff",
+                    cursor: "pointer",
+                    fontWeight: 700,
+                  }}
+                >
+                  새로고침
+                </button>
+              </div>
+
+              <div style={{ fontSize: 13, color: "#666", marginBottom: 10 }}>
+                ready 상태 파일만 작업자에게 지정하세요.
+              </div>
+
+              <div style={{ maxHeight: 420, overflowY: "auto", border: "1px solid #eee", borderRadius: 12 }}>
+                {loadingFiles ? (
+                  <div style={{ padding: 16, color: "#666" }}>불러오는 중...</div>
+                ) : files.length === 0 ? (
+                  <div style={{ padding: 16, color: "#666" }}>업로드된 파일이 없습니다.</div>
+                ) : (
+                  files.map((f) => (
+                    <div
+                      key={f.id || f.file_name}
+                      style={{
+                        padding: 12,
+                        borderBottom: "1px solid #f1f5f9",
+                        background:
+                          String(f?.status) === "failed"
+                            ? "#fff5f5"
+                            : String(f?.status) === "ready"
+                            ? "#f0fdf4"
+                            : "#fff",
+                      }}
+                    >
+                      <div style={{ fontWeight: 800, fontSize: 14, wordBreak: "break-all" }}>
+                        {f.original_name || f.file_name}
+                      </div>
+                      <div style={{ fontSize: 12, color: "#555", marginTop: 4, wordBreak: "break-all" }}>
+                        저장 파일명: {f.file_name}
+                      </div>
+                      <div style={{ fontSize: 12, color: "#555", marginTop: 4 }}>
+                        상태: <b>{f.status}</b>
+                      </div>
+                      {f.error_message ? (
+                        <div style={{ fontSize: 12, color: "#b91c1c", marginTop: 4, whiteSpace: "pre-wrap" }}>
+                          오류: {f.error_message}
+                        </div>
+                      ) : null}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div
+            style={{
+              background: "#fff",
+              borderRadius: 16,
+              border: "1px solid #e5e7eb",
+              boxShadow: "0 6px 24px rgba(0,0,0,0.05)",
+              padding: 16,
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: 12,
+                flexWrap: "wrap",
+                marginBottom: 12,
+              }}
+            >
+              <div style={{ fontSize: 18, fontWeight: 800 }}>사용자 관리</div>
+
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <input
+                  value={searchText}
+                  onChange={(e) => setSearchText(e.target.value)}
+                  placeholder="아이디 / 역할 / 파일 검색"
+                  style={{
+                    padding: "10px 12px",
+                    borderRadius: 10,
+                    border: "1px solid #d1d5db",
+                    minWidth: 260,
+                  }}
+                />
+                <button
+                  onClick={fetchUsers}
+                  style={{
+                    padding: "10px 12px",
+                    borderRadius: 10,
+                    border: "1px solid #ddd",
+                    background: "#fff",
+                    cursor: "pointer",
+                    fontWeight: 700,
+                  }}
+                >
+                  새로고침
+                </button>
+              </div>
+            </div>
+
+            <div style={{ overflowX: "auto", border: "1px solid #eee", borderRadius: 12 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 980 }}>
+                <thead>
+                  <tr style={{ background: "#f8fafc" }}>
+                    {[
+                      "아이디",
+                      "비밀번호",
+                      "역할",
+                      "category",
+                      "Group",
+                      "조회권한",
+                      "현재 파일",
+                      "파일 배정",
+                      "편집",
+                    ].map((h) => (
+                      <th
+                        key={h}
+                        style={{
+                          textAlign: "left",
+                          padding: "12px 10px",
+                          borderBottom: "1px solid #e5e7eb",
+                          fontSize: 13,
+                        }}
+                      >
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {loadingUsers ? (
+                    <tr>
+                      <td colSpan={9} style={{ padding: 16, color: "#666" }}>
+                        불러오는 중...
+                      </td>
+                    </tr>
+                  ) : filteredUsers.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} style={{ padding: 16, color: "#666" }}>
+                        조회된 사용자가 없습니다.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredUsers.map((row) => (
+                      <tr key={row.id}>
+                        <td style={{ padding: "12px 10px", borderBottom: "1px solid #f1f5f9" }}>{row.id}</td>
+                        <td style={{ padding: "12px 10px", borderBottom: "1px solid #f1f5f9" }}>{row.password}</td>
+                        <td style={{ padding: "12px 10px", borderBottom: "1px solid #f1f5f9" }}>{row.worker_type || USER_ROLE.MODEM}</td>
+                        <td style={{ padding: "12px 10px", borderBottom: "1px solid #f1f5f9" }}>{row.category ?? "-"}</td>
+                        <td style={{ padding: "12px 10px", borderBottom: "1px solid #f1f5f9" }}>{row.Group ?? row.group ?? "-"}</td>
+                        <td style={{ padding: "12px 10px", borderBottom: "1px solid #f1f5f9" }}>{String(row.can_view_others)}</td>
+                        <td style={{ padding: "12px 10px", borderBottom: "1px solid #f1f5f9", wordBreak: "break-all" }}>
+                          {row.data_file || "EMPTY"}
+                        </td>
+                        <td style={{ padding: "12px 10px", borderBottom: "1px solid #f1f5f9" }}>
+                          <select
+                            value={row.data_file || "EMPTY"}
+                            onChange={(e) => assignFileQuickly(row.id, e.target.value)}
+                            style={{
+                              width: 220,
+                              maxWidth: "100%",
+                              padding: "9px 10px",
+                              borderRadius: 10,
+                              border: "1px solid #d1d5db",
+                            }}
+                          >
+                            <option value="EMPTY">EMPTY</option>
+                            {readyFiles.map((f) => (
+                              <option key={f.file_name} value={f.file_name}>
+                                {f.file_name}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td style={{ padding: "12px 10px", borderBottom: "1px solid #f1f5f9" }}>
+                          <button
+                            onClick={() => openEdit(row)}
+                            style={{
+                              padding: "8px 10px",
+                              borderRadius: 10,
+                              border: "none",
+                              background: "#111827",
+                              color: "white",
+                              cursor: "pointer",
+                              fontWeight: 700,
+                            }}
+                          >
+                            편집
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {editing && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.35)",
+            zIndex: 1000001,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+          }}
+          onClick={() => setEditing(null)}
+        >
+          <div
+            style={{
+              width: "100%",
+              maxWidth: 520,
+              background: "white",
+              borderRadius: 18,
+              padding: 18,
+              boxShadow: "0 20px 60px rgba(0,0,0,0.2)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 14 }}>사용자 편집</div>
+
+            <div style={{ display: "grid", gap: 12 }}>
+              <label style={{ display: "grid", gap: 6 }}>
+                <span style={{ fontSize: 13, fontWeight: 700 }}>아이디</span>
+                <input
+                  value={editing.id}
+                  onChange={(e) => setEditing((prev) => ({ ...prev, id: e.target.value }))}
+                  style={{ padding: "11px 12px", borderRadius: 10, border: "1px solid #d1d5db" }}
+                />
+              </label>
+
+              <label style={{ display: "grid", gap: 6 }}>
+                <span style={{ fontSize: 13, fontWeight: 700 }}>비밀번호</span>
+                <input
+                  value={editing.password}
+                  onChange={(e) => setEditing((prev) => ({ ...prev, password: e.target.value }))}
+                  style={{ padding: "11px 12px", borderRadius: 10, border: "1px solid #d1d5db" }}
+                />
+              </label>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <label style={{ display: "grid", gap: 6 }}>
+                  <span style={{ fontSize: 13, fontWeight: 700 }}>worker_type</span>
+                  <select
+                    value={editing.worker_type}
+                    onChange={(e) => setEditing((prev) => ({ ...prev, worker_type: e.target.value }))}
+                    style={{ padding: "11px 12px", borderRadius: 10, border: "1px solid #d1d5db" }}
+                  >
+                    <option value={USER_ROLE.MODEM}>{USER_ROLE.MODEM}</option>
+                    <option value={USER_ROLE.METER}>{USER_ROLE.METER}</option>
+                  </select>
+                </label>
+
+                <label style={{ display: "grid", gap: 6 }}>
+                  <span style={{ fontSize: 13, fontWeight: 700 }}>조회권한</span>
+                  <select
+                    value={editing.can_view_others ? "true" : "false"}
+                    onChange={(e) =>
+                      setEditing((prev) => ({
+                        ...prev,
+                        can_view_others: e.target.value === "true",
+                      }))
+                    }
+                    style={{ padding: "11px 12px", borderRadius: 10, border: "1px solid #d1d5db" }}
+                  >
+                    <option value="false">FALSE</option>
+                    <option value="true">TRUE</option>
+                  </select>
+                </label>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <label style={{ display: "grid", gap: 6 }}>
+                  <span style={{ fontSize: 13, fontWeight: 700 }}>category</span>
+                  <input
+                    value={editing.category}
+                    onChange={(e) => setEditing((prev) => ({ ...prev, category: e.target.value }))}
+                    style={{ padding: "11px 12px", borderRadius: 10, border: "1px solid #d1d5db" }}
+                  />
+                </label>
+
+                <label style={{ display: "grid", gap: 6 }}>
+                  <span style={{ fontSize: 13, fontWeight: 700 }}>Group</span>
+                  <input
+                    value={editing.Group}
+                    onChange={(e) => setEditing((prev) => ({ ...prev, Group: e.target.value }))}
+                    style={{ padding: "11px 12px", borderRadius: 10, border: "1px solid #d1d5db" }}
+                  />
+                </label>
+              </div>
+
+              <label style={{ display: "grid", gap: 6 }}>
+                <span style={{ fontSize: 13, fontWeight: 700 }}>data_file</span>
+                <select
+                  value={editing.data_file || "EMPTY"}
+                  onChange={(e) => setEditing((prev) => ({ ...prev, data_file: e.target.value }))}
+                  style={{ padding: "11px 12px", borderRadius: 10, border: "1px solid #d1d5db" }}
+                >
+                  <option value="EMPTY">EMPTY</option>
+                  {readyFiles.map((f) => (
+                    <option key={f.file_name} value={f.file_name}>
+                      {f.file_name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}>
+              <button
+                onClick={() => setEditing(null)}
+                style={{
+                  padding: "10px 14px",
+                  borderRadius: 10,
+                  border: "1px solid #d1d5db",
+                  background: "white",
+                  cursor: "pointer",
+                  fontWeight: 700,
+                }}
+              >
+                취소
+              </button>
+              <button
+                onClick={saveUser}
+                disabled={savingUserId === editing.originalId}
+                style={{
+                  padding: "10px 14px",
+                  borderRadius: 10,
+                  border: "none",
+                  background: "#2563eb",
+                  color: "white",
+                  cursor: savingUserId === editing.originalId ? "default" : "pointer",
+                  fontWeight: 800,
+                }}
+              >
+                {savingUserId === editing.originalId ? "저장 중..." : "저장"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function App() {
   const [user, setUser] = useState("");
   const [password, setPassword] = useState("");
   const [loggedIn, setLoggedIn] = useState(false);
+  const [screen, setScreen] = useState("map");
   const [data, setData] = useState([]);
   const [map, setMap] = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
@@ -734,6 +1464,8 @@ const { data: chunkRows, error } = await supabase
         comm_type: r["통신방식"] || "",
         list_no: r["리스트번호"] || "",
         contract_type: r["계약종별"] || "",
+        lat: r["lat"] ?? r["위도"] ?? null,
+        lng: r["lng"] ?? r["경도"] ?? null,
       }));
 
 
@@ -2871,6 +3603,15 @@ useEffect(() => {
   }, [map, currentUser]);
 
 
+  if (screen === "admin" && isAdmin) {
+    return (
+      <AdminPage
+        currentUser={currentUser}
+        onBack={() => setScreen("map")}
+      />
+    );
+  }
+
   /** 로그인 UI **/
   if (!loggedIn)
     return (
@@ -3724,6 +4465,28 @@ useEffect(() => {
       >
         🗺️ 지도 전환 ({mapType === "ROADMAP" ? "스카이뷰" : "일반"})
       </button>
+
+      {isAdmin && (
+        <button
+          onClick={() => setScreen("admin")}
+          style={{
+            position: "fixed",
+            bottom: 68,
+            right: 20,
+            zIndex: 999999,
+            padding: "10px 14px",
+            borderRadius: "8px",
+            border: "none",
+            background: "#111827",
+            color: "white",
+            cursor: "pointer",
+            fontWeight: 800,
+            boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
+          }}
+        >
+          ⚙️ 관리자 페이지
+        </button>
+      )}
 
       {isAdmin && (
         <div
