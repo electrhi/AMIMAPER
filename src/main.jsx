@@ -348,7 +348,7 @@ function AdminPage({ currentUser, onBack }) {
       if (metaError) throw metaError;
 
       const { data, error: invokeError } = await supabase.functions.invoke(
-        "swift-task",
+        "process-excel-upload",
         {
           body: {
             storagePath: incomingPath,
