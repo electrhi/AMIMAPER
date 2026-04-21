@@ -1779,25 +1779,44 @@ rows.forEach((d) => {
 
   /** Kakao 지도 초기화 **/
   useEffect(() => {
-    if (!loggedIn) return;
+    if (!loggedIn || screen !== "map") return;
     console.log("[DEBUG][MAP] 🗺️ Kakao 지도 로드 중...");
 
-    const script = document.createElement("script");
-    script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${KAKAO_KEY}&autoload=false&libraries=services`;
-    script.onload = () => {
-      window.kakao.maps.load(() => {
-        const mapInstance = new window.kakao.maps.Map(
-          document.getElementById("map"),
-          {
-            center: new window.kakao.maps.LatLng(37.5665, 126.978),
-            level: 5,
-          }
-        );
-        setMap(mapInstance);
+    const initMap = () => {
+      const mapContainer = document.getElementById("map");
+      if (!mapContainer || !window.kakao?.maps) return;
+
+      const mapInstance = new window.kakao.maps.Map(mapContainer, {
+        center: new window.kakao.maps.LatLng(37.5665, 126.978),
+        level: 5,
       });
+
+      setMap(mapInstance);
+
+      setTimeout(() => {
+        try {
+          mapInstance.relayout?.();
+        } catch {}
+      }, 0);
     };
-    document.head.appendChild(script);
-  }, [loggedIn]);
+
+    if (window.kakao?.maps) {
+      initMap();
+      return;
+    }
+
+    let script = document.querySelector('script[data-amimap-kakao="true"]');
+    if (!script) {
+      script = document.createElement("script");
+      script.setAttribute("data-amimap-kakao", "true");
+      script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${KAKAO_KEY}&autoload=false&libraries=services`;
+      script.onload = () => window.kakao.maps.load(initMap);
+      document.head.appendChild(script);
+      return;
+    }
+
+    script.onload = () => window.kakao.maps.load(initMap);
+  }, [loggedIn, screen]);
   
 
   useEffect(() => {
@@ -3864,11 +3883,21 @@ useEffect(() => {
   }, [map, currentUser]);
 
 
+  const openAdminPage = () => {
+    setMap(null);
+    setScreen("admin");
+  };
+
+  const backToMapPage = () => {
+    setMap(null);
+    setScreen("map");
+  };
+
   if (screen === "admin" && isAdmin) {
     return (
       <AdminPage
         currentUser={currentUser}
-        onBack={() => setScreen("map")}
+        onBack={backToMapPage}
       />
     );
   }
@@ -4729,7 +4758,7 @@ useEffect(() => {
 
       {isAdmin && (
         <button
-          onClick={() => setScreen("admin")}
+          onClick={openAdminPage}
           style={{
             position: "fixed",
             bottom: 68,
