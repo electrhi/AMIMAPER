@@ -422,22 +422,6 @@ function AdminPage({ currentUser, onBack }) {
     });
 
     try {
-      const { error: initialMetaError } = await supabase.from("excel_files").upsert(
-        {
-          file_name: safeOriginalName,
-          original_name: selectedFile.name,
-          storage_path: incomingPath,
-          status: FILE_STATUS_UPLOADED,
-          uploaded_by: currentUser.id,
-          error_message: null,
-          progress_pct: 5,
-          progress_message: "원본 업로드 준비 중...",
-        },
-        { onConflict: "file_name" }
-      );
-
-      if (initialMetaError) throw initialMetaError;
-
       const { error: storageError } = await supabase.storage
         .from("excels")
         .upload(incomingPath, selectedFile, {
@@ -448,20 +432,6 @@ function AdminPage({ currentUser, onBack }) {
         });
 
       if (storageError) throw storageError;
-
-      await supabase.from("excel_files").upsert(
-        {
-          file_name: safeOriginalName,
-          original_name: selectedFile.name,
-          storage_path: incomingPath,
-          status: FILE_STATUS_UPLOADED,
-          uploaded_by: currentUser.id,
-          error_message: null,
-          progress_pct: 20,
-          progress_message: "원본 업로드 완료",
-        },
-        { onConflict: "file_name" }
-      );
 
       setUploadProgress((prev) => ({
         ...prev,
@@ -480,7 +450,7 @@ function AdminPage({ currentUser, onBack }) {
       }));
 
       const { data, error: invokeError } = await supabase.functions.invoke(
-        "swift-task",
+        "process-excel-upload",
         {
           body: {
             storagePath: incomingPath,
@@ -511,22 +481,6 @@ function AdminPage({ currentUser, onBack }) {
       }));
     } catch (err) {
       console.error("[ADMIN][UPLOAD] 실패:", err.message);
-
-      try {
-        await supabase.from("excel_files").upsert(
-          {
-            file_name: safeOriginalName,
-            original_name: selectedFile?.name || safeOriginalName,
-            storage_path: incomingPath,
-            status: FILE_STATUS_FAILED,
-            uploaded_by: currentUser.id,
-            error_message: err.message,
-            progress_pct: 0,
-            progress_message: "업로드 실패",
-          },
-          { onConflict: "file_name" }
-        );
-      } catch {}
 
       setUploadProgress((prev) => ({
         ...prev,
@@ -596,7 +550,7 @@ function AdminPage({ currentUser, onBack }) {
                 fontWeight: 800,
               }}
             >
-              지도으로 돌아가기
+              지도로 돌아가기
             </button>
           </div>
         </div>
