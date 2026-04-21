@@ -141,7 +141,11 @@ const chunkArray = (arr, size = 500) => {
 
 
 
+
 const FILE_STATUS_READY = "ready";
+const FILE_STATUS_UPLOADED = "uploaded";
+const FILE_STATUS_PROCESSING = "processing";
+const FILE_STATUS_FAILED = "failed";
 
 const toBool = (v) => {
   if (v === true || v === false) return v;
@@ -156,6 +160,14 @@ const sanitizeFileName = (name) => {
   return clean || `upload_${Date.now()}.xlsx`;
 };
 
+const getFileProgressPercent = (row, fallback = 0) => {
+  const n = Number(row?.progress_pct);
+  if (Number.isFinite(n)) {
+    return Math.max(0, Math.min(100, Math.round(n)));
+  }
+  return fallback;
+};
+
 function AdminPage({ currentUser, onBack }) {
   const [users, setUsers] = useState([]);
   const [files, setFiles] = useState([]);
@@ -166,10 +178,29 @@ function AdminPage({ currentUser, onBack }) {
   const [selectedFile, setSelectedFile] = useState(null);
   const [editing, setEditing] = useState(null);
   const [searchText, setSearchText] = useState("");
+  const pollingTimerRef = useRef(null);
+  const [uploadProgress, setUploadProgress] = useState({
+    open: false,
+    fileName: "",
+    percent: 0,
+    message: "",
+    status: "idle",
+    error: "",
+  });
+
+  const dedupedFiles = React.useMemo(() => {
+    const byName = new Map();
+    for (const row of files || []) {
+      const key = String(row?.file_name ?? row?.original_name ?? row?.id ?? "").trim();
+      if (!key) continue;
+      if (!byName.has(key)) byName.set(key, row);
+    }
+    return Array.from(byName.values());
+  }, [files]);
 
   const readyFiles = React.useMemo(
-    () => files.filter((f) => String(f?.status ?? "") === FILE_STATUS_READY),
-    [files]
+    () => dedupedFiles.filter((f) => String(f?.status ?? "").trim().toLowerCase() === FILE_STATUS_READY),
+    [dedupedFiles]
   );
 
   const filteredUsers = React.useMemo(() => {
@@ -189,6 +220,17 @@ function AdminPage({ currentUser, onBack }) {
         .includes(q);
     });
   }, [users, searchText]);
+
+  const stopPolling = () => {
+    if (pollingTimerRef.current) {
+      clearInterval(pollingTimerRef.current);
+      pollingTimerRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    return () => stopPolling();
+  }, []);
 
   const fetchUsers = async () => {
     setLoadingUsers(true);
@@ -215,6 +257,7 @@ function AdminPage({ currentUser, onBack }) {
       const { data, error } = await supabase
         .from("excel_files")
         .select("*")
+        .order("updated_at", { ascending: false })
         .order("created_at", { ascending: false });
 
       if (error) throw error;
@@ -305,6 +348,52 @@ function AdminPage({ currentUser, onBack }) {
     }
   };
 
+  const startPolling = (fileName) => {
+    stopPolling();
+
+    pollingTimerRef.current = setInterval(async () => {
+      try {
+        const { data, error } = await supabase
+          .from("excel_files")
+          .select("file_name,status,error_message,progress_pct,progress_message,updated_at")
+          .eq("file_name", fileName)
+          .maybeSingle();
+
+        if (error || !data) return;
+
+        const status = String(data.status ?? FILE_STATUS_PROCESSING).trim().toLowerCase();
+        const percent = getFileProgressPercent(data, 25);
+        const message = String(data.progress_message ?? "가공 중...").trim() || "가공 중...";
+        const errorText = String(data.error_message ?? "").trim();
+
+        setUploadProgress((prev) => ({
+          ...prev,
+          open: true,
+          status,
+          fileName,
+          percent: Math.max(prev.percent, percent),
+          message,
+          error: errorText,
+        }));
+
+        if (status === FILE_STATUS_READY || status === FILE_STATUS_FAILED) {
+          stopPolling();
+          fetchFiles();
+        }
+      } catch (err) {
+        console.error("[ADMIN][POLL] 실패:", err.message);
+      }
+    }, 1200);
+  };
+
+  const closeUploadProgress = () => {
+    if (uploading) return;
+    setUploadProgress((prev) => ({
+      ...prev,
+      open: false,
+    }));
+  };
+
   const handleUpload = async () => {
     if (!selectedFile) {
       alert("업로드할 엑셀 파일을 선택해주세요.");
@@ -317,10 +406,37 @@ function AdminPage({ currentUser, onBack }) {
     }
 
     setUploading(true);
+    stopPolling();
+
+    const safeOriginalName = sanitizeFileName(selectedFile.name);
+    const incomingObjectName = `${Date.now()}_${safeOriginalName}`;
+    const incomingPath = `incoming/${incomingObjectName}`;
+
+    setUploadProgress({
+      open: true,
+      fileName: safeOriginalName,
+      percent: 3,
+      message: "업로드 준비 중...",
+      status: FILE_STATUS_UPLOADED,
+      error: "",
+    });
+
     try {
-      const safeOriginalName = sanitizeFileName(selectedFile.name);
-      const finalFileName = `${Date.now()}_${safeOriginalName}`;
-      const incomingPath = `incoming/${finalFileName}`;
+      const { error: initialMetaError } = await supabase.from("excel_files").upsert(
+        {
+          file_name: safeOriginalName,
+          original_name: selectedFile.name,
+          storage_path: incomingPath,
+          status: FILE_STATUS_UPLOADED,
+          uploaded_by: currentUser.id,
+          error_message: null,
+          progress_pct: 5,
+          progress_message: "원본 업로드 준비 중...",
+        },
+        { onConflict: "file_name" }
+      );
+
+      if (initialMetaError) throw initialMetaError;
 
       const { error: storageError } = await supabase.storage
         .from("excels")
@@ -333,26 +449,42 @@ function AdminPage({ currentUser, onBack }) {
 
       if (storageError) throw storageError;
 
-      const { error: metaError } = await supabase.from("excel_files").upsert(
+      await supabase.from("excel_files").upsert(
         {
-          file_name: finalFileName,
+          file_name: safeOriginalName,
           original_name: selectedFile.name,
           storage_path: incomingPath,
-          status: "uploaded",
+          status: FILE_STATUS_UPLOADED,
           uploaded_by: currentUser.id,
           error_message: null,
+          progress_pct: 20,
+          progress_message: "원본 업로드 완료",
         },
         { onConflict: "file_name" }
       );
 
-      if (metaError) throw metaError;
+      setUploadProgress((prev) => ({
+        ...prev,
+        percent: 20,
+        message: "원본 업로드 완료",
+        status: FILE_STATUS_UPLOADED,
+      }));
+
+      startPolling(safeOriginalName);
+
+      setUploadProgress((prev) => ({
+        ...prev,
+        percent: 25,
+        message: "서버 가공 요청 중...",
+        status: FILE_STATUS_PROCESSING,
+      }));
 
       const { data, error: invokeError } = await supabase.functions.invoke(
-        "process-excel-upload",
+        "swift-task",
         {
           body: {
             storagePath: incomingPath,
-            fileName: finalFileName,
+            fileName: safeOriginalName,
             originalName: selectedFile.name,
             uploadedBy: currentUser.id,
           },
@@ -369,12 +501,43 @@ function AdminPage({ currentUser, onBack }) {
       if (input) input.value = "";
 
       await fetchFiles();
-      alert("업로드 및 가공이 완료되었습니다.");
+      setUploadProgress((prev) => ({
+        ...prev,
+        open: true,
+        status: FILE_STATUS_READY,
+        percent: 100,
+        message: "업로드 및 가공이 완료되었습니다.",
+        error: "",
+      }));
     } catch (err) {
       console.error("[ADMIN][UPLOAD] 실패:", err.message);
-      alert(`엑셀 업로드 실패: ${err.message}`);
+
+      try {
+        await supabase.from("excel_files").upsert(
+          {
+            file_name: safeOriginalName,
+            original_name: selectedFile?.name || safeOriginalName,
+            storage_path: incomingPath,
+            status: FILE_STATUS_FAILED,
+            uploaded_by: currentUser.id,
+            error_message: err.message,
+            progress_pct: 0,
+            progress_message: "업로드 실패",
+          },
+          { onConflict: "file_name" }
+        );
+      } catch {}
+
+      setUploadProgress((prev) => ({
+        ...prev,
+        open: true,
+        status: FILE_STATUS_FAILED,
+        message: "업로드 실패",
+        error: err.message,
+      }));
       await fetchFiles();
     } finally {
+      stopPolling();
       setUploading(false);
     }
   };
@@ -530,39 +693,46 @@ function AdminPage({ currentUser, onBack }) {
               <div style={{ maxHeight: 420, overflowY: "auto", border: "1px solid #eee", borderRadius: 12 }}>
                 {loadingFiles ? (
                   <div style={{ padding: 16, color: "#666" }}>불러오는 중...</div>
-                ) : files.length === 0 ? (
+                ) : dedupedFiles.length === 0 ? (
                   <div style={{ padding: 16, color: "#666" }}>업로드된 파일이 없습니다.</div>
                 ) : (
-                  files.map((f) => (
-                    <div
-                      key={f.id || f.file_name}
-                      style={{
-                        padding: 12,
-                        borderBottom: "1px solid #f1f5f9",
-                        background:
-                          String(f?.status) === "failed"
-                            ? "#fff5f5"
-                            : String(f?.status) === "ready"
-                            ? "#f0fdf4"
-                            : "#fff",
-                      }}
-                    >
-                      <div style={{ fontWeight: 800, fontSize: 14, wordBreak: "break-all" }}>
-                        {f.original_name || f.file_name}
-                      </div>
-                      <div style={{ fontSize: 12, color: "#555", marginTop: 4, wordBreak: "break-all" }}>
-                        저장 파일명: {f.file_name}
-                      </div>
-                      <div style={{ fontSize: 12, color: "#555", marginTop: 4 }}>
-                        상태: <b>{f.status}</b>
-                      </div>
-                      {f.error_message ? (
-                        <div style={{ fontSize: 12, color: "#b91c1c", marginTop: 4, whiteSpace: "pre-wrap" }}>
-                          오류: {f.error_message}
+                  dedupedFiles.map((f) => {
+                    const status = String(f?.status ?? "").trim().toLowerCase();
+                    const percent = getFileProgressPercent(f, status === FILE_STATUS_READY ? 100 : 0);
+                    return (
+                      <div
+                        key={f.id || f.file_name}
+                        style={{
+                          padding: 12,
+                          borderBottom: "1px solid #f1f5f9",
+                          background:
+                            status === FILE_STATUS_FAILED
+                              ? "#fff5f5"
+                              : status === FILE_STATUS_READY
+                              ? "#f0fdf4"
+                              : "#fff",
+                        }}
+                      >
+                        <div style={{ fontWeight: 800, fontSize: 14, wordBreak: "break-all" }}>
+                          {f.file_name}
                         </div>
-                      ) : null}
-                    </div>
-                  ))
+                        <div style={{ fontSize: 12, color: "#555", marginTop: 4, wordBreak: "break-all" }}>
+                          원본명: {f.original_name || f.file_name}
+                        </div>
+                        <div style={{ fontSize: 12, color: "#555", marginTop: 4 }}>
+                          상태: <b>{f.status}</b> · 진행률: <b>{percent}%</b>
+                        </div>
+                        <div style={{ fontSize: 12, color: "#555", marginTop: 4, whiteSpace: "pre-wrap" }}>
+                          진행내용: {f.progress_message || "-"}
+                        </div>
+                        {f.error_message ? (
+                          <div style={{ fontSize: 12, color: "#b91c1c", marginTop: 4, whiteSpace: "pre-wrap" }}>
+                            오류: {f.error_message}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })
                 )}
               </div>
             </div>
@@ -593,7 +763,7 @@ function AdminPage({ currentUser, onBack }) {
                 <input
                   value={searchText}
                   onChange={(e) => setSearchText(e.target.value)}
-                  placeholder="아이디 / 역할 / 파일 검색"
+                  placeholder="아이디 / 역할 / 권역 / 조 / 파일 검색"
                   style={{
                     padding: "10px 12px",
                     borderRadius: 10,
@@ -618,20 +788,10 @@ function AdminPage({ currentUser, onBack }) {
             </div>
 
             <div style={{ overflowX: "auto", border: "1px solid #eee", borderRadius: 12 }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 980 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 880 }}>
                 <thead>
                   <tr style={{ background: "#f8fafc" }}>
-                    {[
-                      "아이디",
-                      "비밀번호",
-                      "역할",
-                      "category",
-                      "Group",
-                      "조회권한",
-                      "현재 파일",
-                      "파일 배정",
-                      "편집",
-                    ].map((h) => (
+                    {["아이디", "역할", "권역", "조", "현재파일", "파일배정"].map((h) => (
                       <th
                         key={h}
                         style={{
@@ -649,29 +809,27 @@ function AdminPage({ currentUser, onBack }) {
                 <tbody>
                   {loadingUsers ? (
                     <tr>
-                      <td colSpan={9} style={{ padding: 16, color: "#666" }}>
+                      <td colSpan={6} style={{ padding: 16, color: "#666" }}>
                         불러오는 중...
                       </td>
                     </tr>
                   ) : filteredUsers.length === 0 ? (
                     <tr>
-                      <td colSpan={9} style={{ padding: 16, color: "#666" }}>
+                      <td colSpan={6} style={{ padding: 16, color: "#666" }}>
                         조회된 사용자가 없습니다.
                       </td>
                     </tr>
                   ) : (
                     filteredUsers.map((row) => (
-                      <tr key={row.id}>
+                      <tr key={row.id} onClick={() => openEdit(row)} style={{ cursor: "pointer" }}>
                         <td style={{ padding: "12px 10px", borderBottom: "1px solid #f1f5f9" }}>{row.id}</td>
-                        <td style={{ padding: "12px 10px", borderBottom: "1px solid #f1f5f9" }}>{row.password}</td>
                         <td style={{ padding: "12px 10px", borderBottom: "1px solid #f1f5f9" }}>{row.worker_type || USER_ROLE.MODEM}</td>
                         <td style={{ padding: "12px 10px", borderBottom: "1px solid #f1f5f9" }}>{row.category ?? "-"}</td>
                         <td style={{ padding: "12px 10px", borderBottom: "1px solid #f1f5f9" }}>{row.Group ?? row.group ?? "-"}</td>
-                        <td style={{ padding: "12px 10px", borderBottom: "1px solid #f1f5f9" }}>{String(row.can_view_others)}</td>
                         <td style={{ padding: "12px 10px", borderBottom: "1px solid #f1f5f9", wordBreak: "break-all" }}>
                           {row.data_file || "EMPTY"}
                         </td>
-                        <td style={{ padding: "12px 10px", borderBottom: "1px solid #f1f5f9" }}>
+                        <td style={{ padding: "12px 10px", borderBottom: "1px solid #f1f5f9" }} onClick={(e) => e.stopPropagation()}>
                           <select
                             value={row.data_file || "EMPTY"}
                             onChange={(e) => assignFileQuickly(row.id, e.target.value)}
@@ -691,27 +849,14 @@ function AdminPage({ currentUser, onBack }) {
                             ))}
                           </select>
                         </td>
-                        <td style={{ padding: "12px 10px", borderBottom: "1px solid #f1f5f9" }}>
-                          <button
-                            onClick={() => openEdit(row)}
-                            style={{
-                              padding: "8px 10px",
-                              borderRadius: 10,
-                              border: "none",
-                              background: "#111827",
-                              color: "white",
-                              cursor: "pointer",
-                              fontWeight: 700,
-                            }}
-                          >
-                            편집
-                          </button>
-                        </td>
                       </tr>
                     ))
                   )}
                 </tbody>
               </table>
+            </div>
+            <div style={{ fontSize: 12, color: "#666", marginTop: 8 }}>
+              사용자 행을 클릭하면 상세 편집창이 열립니다.
             </div>
           </div>
         </div>
@@ -765,7 +910,7 @@ function AdminPage({ currentUser, onBack }) {
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 <label style={{ display: "grid", gap: 6 }}>
-                  <span style={{ fontSize: 13, fontWeight: 700 }}>worker_type</span>
+                  <span style={{ fontSize: 13, fontWeight: 700 }}>역할</span>
                   <select
                     value={editing.worker_type}
                     onChange={(e) => setEditing((prev) => ({ ...prev, worker_type: e.target.value }))}
@@ -796,7 +941,7 @@ function AdminPage({ currentUser, onBack }) {
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 <label style={{ display: "grid", gap: 6 }}>
-                  <span style={{ fontSize: 13, fontWeight: 700 }}>category</span>
+                  <span style={{ fontSize: 13, fontWeight: 700 }}>권역</span>
                   <input
                     value={editing.category}
                     onChange={(e) => setEditing((prev) => ({ ...prev, category: e.target.value }))}
@@ -805,7 +950,7 @@ function AdminPage({ currentUser, onBack }) {
                 </label>
 
                 <label style={{ display: "grid", gap: 6 }}>
-                  <span style={{ fontSize: 13, fontWeight: 700 }}>Group</span>
+                  <span style={{ fontSize: 13, fontWeight: 700 }}>조</span>
                   <input
                     value={editing.Group}
                     onChange={(e) => setEditing((prev) => ({ ...prev, Group: e.target.value }))}
@@ -815,7 +960,7 @@ function AdminPage({ currentUser, onBack }) {
               </div>
 
               <label style={{ display: "grid", gap: 6 }}>
-                <span style={{ fontSize: 13, fontWeight: 700 }}>data_file</span>
+                <span style={{ fontSize: 13, fontWeight: 700 }}>파일 배정</span>
                 <select
                   value={editing.data_file || "EMPTY"}
                   onChange={(e) => setEditing((prev) => ({ ...prev, data_file: e.target.value }))}
@@ -859,6 +1004,89 @@ function AdminPage({ currentUser, onBack }) {
                 }}
               >
                 {savingUserId === editing.originalId ? "저장 중..." : "저장"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {uploadProgress.open && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.35)",
+            zIndex: 1000002,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+          }}
+          onClick={closeUploadProgress}
+        >
+          <div
+            style={{
+              width: "100%",
+              maxWidth: 440,
+              background: "#fff",
+              borderRadius: 18,
+              padding: 18,
+              boxShadow: "0 20px 60px rgba(0,0,0,0.2)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 8 }}>업로드 진행상황</div>
+            <div style={{ fontSize: 13, color: "#666", wordBreak: "break-all", marginBottom: 12 }}>
+              파일: {uploadProgress.fileName || "-"}
+            </div>
+            <div
+              style={{
+                height: 14,
+                borderRadius: 999,
+                background: "#e5e7eb",
+                overflow: "hidden",
+                marginBottom: 10,
+              }}
+            >
+              <div
+                style={{
+                  width: `${Math.max(0, Math.min(100, uploadProgress.percent || 0))}%`,
+                  height: "100%",
+                  background:
+                    uploadProgress.status === FILE_STATUS_FAILED ? "#dc2626" : "#2563eb",
+                  transition: "width 0.35s ease",
+                }}
+              />
+            </div>
+            <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 6 }}>
+              {Math.max(0, Math.min(100, uploadProgress.percent || 0))}%
+            </div>
+            <div style={{ fontSize: 13, color: "#444", whiteSpace: "pre-wrap" }}>
+              {uploadProgress.message || "처리 중..."}
+            </div>
+            {uploadProgress.error ? (
+              <div style={{ fontSize: 12, color: "#b91c1c", marginTop: 8, whiteSpace: "pre-wrap" }}>
+                오류: {uploadProgress.error}
+              </div>
+            ) : null}
+            <div style={{ fontSize: 12, color: "#666", marginTop: 10 }}>
+              % 값은 원본 업로드 + 서버 가공 전체 단계를 기준으로 표시됩니다.
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
+              <button
+                onClick={closeUploadProgress}
+                disabled={uploading}
+                style={{
+                  padding: "10px 14px",
+                  borderRadius: 10,
+                  border: "1px solid #d1d5db",
+                  background: "white",
+                  cursor: uploading ? "default" : "pointer",
+                  fontWeight: 700,
+                  opacity: uploading ? 0.5 : 1,
+                }}
+              >
+                확인
               </button>
             </div>
           </div>
