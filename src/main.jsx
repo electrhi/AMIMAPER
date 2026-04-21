@@ -168,6 +168,15 @@ const getFileProgressPercent = (row, fallback = 0) => {
   return fallback;
 };
 
+const isAssignableExcelFileName = (name) => {
+  const s = String(name ?? "").trim();
+  if (!s) return false;
+  if (s.includes("/")) return false;
+  if (!/\.xlsx$/i.test(s)) return false;
+  if (/^geoCache_/i.test(s)) return false;
+  return true;
+};
+
 function AdminPage({ currentUser, onBack }) {
   const [users, setUsers] = useState([]);
   const [files, setFiles] = useState([]);
@@ -199,7 +208,16 @@ function AdminPage({ currentUser, onBack }) {
   }, [files]);
 
   const readyFiles = React.useMemo(
-    () => dedupedFiles.filter((f) => String(f?.status ?? "").trim().toLowerCase() === FILE_STATUS_READY),
+    () =>
+      dedupedFiles.filter((f) => {
+        const fileName = String(f?.file_name ?? "").trim();
+        if (!isAssignableExcelFileName(fileName)) return false;
+
+        const status = String(f?.status ?? "").trim().toLowerCase();
+        if (status === FILE_STATUS_READY) return true;
+        if (f?.source === "bucket") return true;
+        return getFileProgressPercent(f, 0) >= 100;
+      }),
     [dedupedFiles]
   );
 
@@ -254,14 +272,75 @@ function AdminPage({ currentUser, onBack }) {
   const fetchFiles = async () => {
     setLoadingFiles(true);
     try {
-      const { data, error } = await supabase
-        .from("excel_files")
-        .select("*")
-        .order("updated_at", { ascending: false })
-        .order("created_at", { ascending: false });
+      const [metaRes, storageRes] = await Promise.all([
+        supabase
+          .from("excel_files")
+          .select("*")
+          .order("updated_at", { ascending: false })
+          .order("created_at", { ascending: false }),
+        supabase.storage.from("excels").list("", {
+          limit: 1000,
+          offset: 0,
+          sortBy: { column: "name", order: "asc" },
+        }),
+      ]);
 
-      if (error) throw error;
-      setFiles(data || []);
+      if (metaRes.error) {
+        console.warn("[ADMIN][FILES][META] 조회 경고:", metaRes.error.message);
+      }
+      if (storageRes.error) throw storageRes.error;
+
+      const metaRows = metaRes.data || [];
+      const storageRows = storageRes.data || [];
+
+      const metaByName = new Map();
+      for (const row of metaRows) {
+        const key = String(row?.file_name ?? "").trim();
+        if (!key) continue;
+        if (!metaByName.has(key)) metaByName.set(key, row);
+      }
+
+      const bucketRows = storageRows
+        .filter((item) => isAssignableExcelFileName(item?.name))
+        .map((item) => {
+          const fileName = String(item.name ?? "").trim();
+          const meta = metaByName.get(fileName);
+          return {
+            id: meta?.id || `bucket:${fileName}`,
+            file_name: fileName,
+            original_name: meta?.original_name || fileName,
+            storage_path: meta?.storage_path || fileName,
+            status: String(meta?.status ?? FILE_STATUS_READY).trim().toLowerCase() || FILE_STATUS_READY,
+            uploaded_by: meta?.uploaded_by ?? null,
+            error_message: meta?.error_message || null,
+            progress_pct: meta ? getFileProgressPercent(meta, 100) : 100,
+            progress_message: meta?.progress_message || "버킷에서 확인됨",
+            updated_at: meta?.updated_at || item.updated_at || item.created_at || null,
+            created_at: meta?.created_at || item.created_at || null,
+            source: "bucket",
+          };
+        });
+
+      const bucketNameSet = new Set(bucketRows.map((row) => row.file_name));
+
+      const pendingRows = metaRows
+        .filter((row) => {
+          const fileName = String(row?.file_name ?? "").trim();
+          if (!isAssignableExcelFileName(fileName)) return false;
+          return !bucketNameSet.has(fileName);
+        })
+        .map((row) => ({
+          ...row,
+          source: "meta",
+        }));
+
+      const merged = [...bucketRows, ...pendingRows].sort((a, b) => {
+        const aTime = new Date(a?.updated_at || a?.created_at || 0).getTime();
+        const bTime = new Date(b?.updated_at || b?.created_at || 0).getTime();
+        return bTime - aTime;
+      });
+
+      setFiles(merged);
     } catch (err) {
       console.error("[ADMIN][FILES] fetch 실패:", err.message);
       alert(`파일 목록 조회 실패: ${err.message}`);
@@ -641,7 +720,7 @@ function AdminPage({ currentUser, onBack }) {
               </div>
 
               <div style={{ fontSize: 13, color: "#666", marginBottom: 10 }}>
-                ready 상태 파일만 작업자에게 지정하세요.
+                버킷에 존재하는 엑셀 파일을 기준으로 작업자에게 지정합니다.
               </div>
 
               <div style={{ maxHeight: 420, overflowY: "auto", border: "1px solid #eee", borderRadius: 12 }}>
