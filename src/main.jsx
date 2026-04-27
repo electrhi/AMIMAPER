@@ -160,6 +160,11 @@ const sanitizeFileName = (name) => {
   return clean || `upload_${Date.now()}.xlsx`;
 };
 
+const hasUsableDataFile = (fileName) => {
+  const s = String(fileName ?? "").trim();
+  return !!s && s.toUpperCase() !== "EMPTY";
+};
+
 const getFileProgressPercent = (row, fallback = 0) => {
   const n = Number(row?.progress_pct);
   if (Number.isFinite(n)) {
@@ -300,7 +305,7 @@ function AdminPage({ currentUser, onBack }) {
       const [metaRes, storageRes] = await Promise.all([
         supabase
           .from("excel_files")
-          .select("*")
+          .select("id,file_name,original_name,storage_path,status,uploaded_by,error_message,progress_pct,progress_message,created_at,updated_at,total_addresses,processed_addresses")
           .order("updated_at", { ascending: false })
           .order("created_at", { ascending: false }),
         supabase.storage.from("excels").list("", {
@@ -539,24 +544,16 @@ function AdminPage({ currentUser, onBack }) {
 
       setUploadProgress((prev) => ({
         ...prev,
-        percent: 20,
+        percent: 15,
         message: "원본 업로드 완료",
         status: FILE_STATUS_UPLOADED,
-      }));
-
-      startPolling(safeOriginalName);
-
-      setUploadProgress((prev) => ({
-        ...prev,
-        percent: 25,
-        message: "서버 가공 요청 중...",
-        status: FILE_STATUS_PROCESSING,
       }));
 
       const { data, error: invokeError } = await supabase.functions.invoke(
         "process-excel-upload",
         {
           body: {
+            action: "start",
             storagePath: incomingPath,
             fileName: safeOriginalName,
             originalName: selectedFile.name,
@@ -574,15 +571,17 @@ function AdminPage({ currentUser, onBack }) {
       const input = document.getElementById("admin-upload-input");
       if (input) input.value = "";
 
-      await fetchFiles();
       setUploadProgress((prev) => ({
         ...prev,
         open: true,
-        status: FILE_STATUS_READY,
-        percent: 100,
-        message: "업로드 및 가공이 완료되었습니다.",
+        status: FILE_STATUS_PROCESSING,
+        percent: Math.max(prev.percent, Number(data?.progress_pct ?? 18)),
+        message: data?.message || "작업이 접수되었습니다. 백그라운드에서 계속 처리합니다.",
         error: "",
       }));
+
+      await fetchFiles();
+      startPolling(safeOriginalName);
     } catch (err) {
       console.error("[ADMIN][UPLOAD] 실패:", err.message);
 
@@ -595,7 +594,6 @@ function AdminPage({ currentUser, onBack }) {
       }));
       await fetchFiles();
     } finally {
-      stopPolling();
       setUploading(false);
     }
   };
@@ -1736,7 +1734,9 @@ const clearSearchTemp = () => {
 
 
   // 예: 데이터 파일이 "djdemo.xlsx" 라면 geoCache 파일명은 "geoCache_djdemo.xlsx.json"
-  const GEO_CACHE_FILE = `geoCache_${currentUser?.data_file || "default"}.json`;
+  const GEO_CACHE_FILE = hasUsableDataFile(currentUser?.data_file)
+    ? `geoCache_${currentUser?.data_file}.json`
+    : null;
 
   // 🔹 마커 오버레이들을 유지하기 위한 ref
   const markersRef = useRef([]);
@@ -1975,6 +1975,11 @@ const { data: chunkRows, error } = await supabase
   /** Excel 데이터 로드 **/
   const loadData = async (fileName) => {
     try {
+      if (!hasUsableDataFile(fileName)) {
+        console.log("[DEBUG][DATA] 📂 사용할 엑셀 파일이 없어 로드를 건너뜀:", fileName);
+        setData([]);
+        return;
+      }
       console.log("[DEBUG][DATA] 📂 엑셀 로드 시작:", fileName);
       const { data: excelBlob, error } = await supabase.storage
         .from("excels")
@@ -2092,7 +2097,7 @@ rows.forEach((d) => {
 
   useEffect(() => {
   if (!map || !window.kakao?.maps) return;
-  if (!currentUser?.data_file) return;
+  if (!hasUsableDataFile(currentUser?.data_file)) return;
 
   const syncInViewOnce = async () => {
     console.count("[DEBUG][FETCH] initial sync in view");
@@ -2130,6 +2135,10 @@ rows.forEach((d) => {
   /** Supabase에서 geoCache 파일 로드 (지오코딩 결과 JSON) **/
   useEffect(() => {
     if (!loggedIn || !currentUser) return;
+    if (!GEO_CACHE_FILE) {
+      setGeoCache({});
+      return;
+    }
 
     const loadGeoCache = async () => {
       try {
@@ -3397,7 +3406,7 @@ const runSearch = () => {
   // ✅ 지도 준비되면 1회 임의 마커 로드(같은 엑셀 사용자끼리 공유)
 useEffect(() => {
   if (!map) return;
-  if (!currentUser?.data_file) return;
+  if (!hasUsableDataFile(currentUser?.data_file)) return;
   fetchCustomMarkersFromDB(true);
   // eslint-disable-next-line react-hooks/exhaustive-deps
 }, [map, currentUser?.data_file]);
