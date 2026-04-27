@@ -2644,13 +2644,14 @@ const runSearch = () => {
     const rawStatus = normalizeStatusValue(status);
 
     // ✅ 최종 상태 흐름
-    //    미방문(주황) -> 교체(파랑) -> 완료(초록) | 불가(빨강)
+    //    미방문(주황/농사용 노랑) -> 교체(파랑) -> 완료(초록) | 불가(빨강)
     //    * 사용자 역할과 무관하게 동일 색상 적용
+    //    * 농사/농사용은 모든 작업자에게 "미방문" 상태이면서 색상만 노란색으로 표시
     if (rawStatus === "완료") return "green";
     if (rawStatus === "불가") return "red";
     if (rawStatus === "교체") return "blue";
 
-    // ✅ 사용자의 최종 요청: 기존 미방문은 모두 주황색
+    if (hasFarming) return FARMING_YELLOW;
     return DEFAULT_UNVISITED_ORANGE;
   };
   
