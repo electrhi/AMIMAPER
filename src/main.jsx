@@ -165,6 +165,13 @@ const hasUsableDataFile = (fileName) => {
   return !!s && s.toUpperCase() !== "EMPTY";
 };
 
+// ✅ 사용자 파일 배정 저장값 정규화
+//    화면에서는 EMPTY 옵션을 그대로 보여주되, DB에는 "EMPTY" 문자열이 아니라 공백("")으로 저장
+const normalizeAssignedFileValue = (fileName) => {
+  const s = String(fileName ?? "").trim();
+  return !s || s.toUpperCase() === "EMPTY" ? "" : s;
+};
+
 const getFileProgressPercent = (row, fallback = 0) => {
   const n = Number(row?.progress_pct);
   if (Number.isFinite(n)) {
@@ -411,7 +418,7 @@ function AdminPage({ currentUser, onBack }) {
       const payload = {
         id: nextId,
         password: String(editing.password ?? "").trim(),
-        data_file: String(editing.data_file ?? "").trim() || "EMPTY",
+        data_file: normalizeAssignedFileValue(editing.data_file),
         can_view_others: !!editing.can_view_others,
         category:
           editing.category === "" || editing.category == null
@@ -446,7 +453,7 @@ function AdminPage({ currentUser, onBack }) {
     try {
       const { error } = await supabase
         .from("users")
-        .update({ data_file: fileName || "EMPTY" })
+        .update({ data_file: normalizeAssignedFileValue(fileName) })
         .eq("id", userId);
 
       if (error) throw error;
@@ -1593,12 +1600,19 @@ const noCoordRows = React.useMemo(() => {
     if (seq !== customMarkersFetchSeqRef.current) return;
 
     setCustomMarkers(
-      (rows || []).map((r) => ({
-        id: r.id,
-        lat: Number(r.lat),
-        lng: Number(r.lng),
-        text: r.text || "",
-      }))
+      (rows || [])
+        .map((r) => ({
+          id: r.id,
+          lat: Number(r.lat),
+          lng: Number(r.lng),
+          text: String(r.text ?? "").trim(),
+        }))
+        .filter(
+          (m) =>
+            m.id &&
+            Number.isFinite(m.lat) &&
+            Number.isFinite(m.lng)
+        )
     );
   };
 
@@ -3336,8 +3350,13 @@ const runSearch = () => {
 
     clearCustomMarkerObjects();
 
-    customMarkers.forEach((m) => {
-      const coord = new window.kakao.maps.LatLng(m.lat, m.lng);
+    customMarkers.forEach((m, index) => {
+      const lat = Number(m?.lat);
+      const lng = Number(m?.lng);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+      const text = String(m?.text ?? "").trim();
+      const coord = new window.kakao.maps.LatLng(lat, lng);
 
       const marker = new window.kakao.maps.Marker({
         position: coord,
@@ -3345,6 +3364,7 @@ const runSearch = () => {
       });
       marker.setMap(map);
 
+      // ✅ 임의마커마다 독립 라벨 DOM/Overlay를 생성해서 모든 마커 위에 메모가 보이도록 유지
       const labelEl = document.createElement("div");
       labelEl.style.cssText = `
         background: rgba(255,255,255,0.95);
@@ -3357,16 +3377,19 @@ const runSearch = () => {
         transform: translateY(-6px);
         pointer-events: none;
       `;
-      labelEl.textContent = m.text || "";
+      labelEl.textContent = text;
 
       const label = new window.kakao.maps.CustomOverlay({
         position: coord,
         content: labelEl,
+        xAnchor: 0.5,
         yAnchor: 1.9,
-        zIndex: 999998,
+        zIndex: 999998 + index,
       });
-      if (m.text) label.setMap(map);
-      // ✅ label 생성 후 다시 click 편집 등록(이제 label 포함)
+
+      if (text) label.setMap(map);
+
+      // ✅ marker click 편집 등록(label 포함)
       window.kakao.maps.event.addListener(marker, "click", () => {
         openCustomMarkerEditor({ id: m.id, marker, label });
       });
@@ -3393,7 +3416,7 @@ const runSearch = () => {
         }
       });
 
-      customMarkerObjsRef.current.push({ id: m.id, marker, label });
+      customMarkerObjsRef.current.push({ id: m.id, marker, label, labelEl });
     });
   };
 
