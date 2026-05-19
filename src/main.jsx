@@ -1930,6 +1930,79 @@ const { data: chunkRows, error } = await supabase
     }
   };
 
+
+  /** 🔓 로그아웃 처리 **/
+  const handleLogout = () => {
+    console.log("[DEBUG][AUTH] 로그아웃");
+
+    // ✅ 자동 로그인 방지: 저장된 사용자 ID 제거
+    try {
+      localStorage.removeItem("amimap_user_id");
+      console.log("[DEBUG][AUTH] 로컬스토리지 사용자 ID 제거 완료");
+    } catch (err) {
+      console.warn("[WARN][AUTH] 로컬스토리지 삭제 실패:", err?.message);
+    }
+
+    // ✅ 현재 지도/위치/오버레이 상태만 정리하고, 기존 기능 로직은 유지
+    try {
+      if (myLocationWatchIdRef.current != null && navigator.geolocation) {
+        navigator.geolocation.clearWatch(myLocationWatchIdRef.current);
+      }
+    } catch {}
+    myLocationWatchIdRef.current = null;
+
+    try { myLocationOverlayRef.current?.setMap(null); } catch {}
+    myLocationOverlayRef.current = null;
+    myLocationArrowElRef.current = null;
+    myLastPosRef.current = null;
+    myLastHeadingRef.current = null;
+
+    try { markersRef.current.forEach((m) => m.setMap(null)); } catch {}
+    markersRef.current = [];
+
+    try { addressOverlaysRef.current.forEach((ov) => ov.setMap(null)); } catch {}
+    addressOverlaysRef.current = [];
+
+    try { otherUserOverlays.current.forEach((ov) => ov.setMap(null)); } catch {}
+    otherUserOverlays.current = [];
+
+    try { clearCustomMarkerObjects(); } catch {}
+    try { cleanupDraftMarker(); } catch {}
+    try { closeCustomEditOverlay(); } catch {}
+    try { clearSearchTemp(); } catch {}
+    try {
+      const ov = getActiveOverlay();
+      if (ov) ov.setMap(null);
+      setActiveOverlay(null);
+    } catch {}
+
+    overlayByKeyRef.current.clear();
+    meterToKeyRef.current.clear();
+    labelByKeyRef.current.clear();
+    metersCacheRef.current.clear();
+    buildingNameCacheRef.current.clear();
+
+    setIsAddMarkerMode(false);
+    setCustomMarkers([]);
+    setSearchPanelOpen(false);
+    setSearchOpen(false);
+    setSearchResults([]);
+    setSearchText("");
+    setFilterPanelOpen(false);
+    setNoCoordModalOpen(false);
+
+    setScreen("map");
+    setMap(null);
+    setData([]);
+    dataRef.current = [];
+    setGeoCache({});
+    setCounts({ 완료: 0, 불가: 0, 미방문: 0 });
+    setCurrentUser(null);
+    setUser("");
+    setPassword("");
+    setLoggedIn(false);
+  };
+
   /** 🔐 앱 시작 시 자동 로그인 시도 **/
   useEffect(() => {
     const autoLogin = async () => {
@@ -4993,32 +5066,56 @@ useEffect(() => {
 </div>
 
 
-      {/* ➕ 임의 마커 추가 버튼 (오른쪽 상단) */}
-      <button
-        onClick={() => {
-          setIsAddMarkerMode((v) => {
-            const next = !v;
-            if (!next) cleanupDraftMarker(); // 끌 때 임시 마커/입력창 정리
-            return next;
-          });
-        }}
+      {/* ➕ 임의 마커 추가 버튼 + 로그아웃 버튼 (오른쪽 상단) */}
+      <div
         style={{
           position: "fixed",
           top: 14,
           right: 14,
           zIndex: 999999,
-          padding: "10px 14px",
-          borderRadius: "10px",
-          border: "none",
-          background: isAddMarkerMode ? "#dc3545" : "#28a745",
-          color: "white",
-          cursor: "pointer",
-          fontWeight: 800,
-          boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
+          display: "flex",
+          gap: 8,
+          alignItems: "center",
         }}
       >
-        {isAddMarkerMode ? "✕ 추가 취소" : "➕ 추가"}
-      </button>
+        <button
+          onClick={() => {
+            setIsAddMarkerMode((v) => {
+              const next = !v;
+              if (!next) cleanupDraftMarker(); // 끌 때 임시 마커/입력창 정리
+              return next;
+            });
+          }}
+          style={{
+            padding: "10px 14px",
+            borderRadius: "10px",
+            border: "none",
+            background: isAddMarkerMode ? "#dc3545" : "#28a745",
+            color: "white",
+            cursor: "pointer",
+            fontWeight: 800,
+            boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
+          }}
+        >
+          {isAddMarkerMode ? "✕ 추가 취소" : "➕ 추가"}
+        </button>
+
+        <button
+          onClick={handleLogout}
+          style={{
+            padding: "10px 14px",
+            borderRadius: "10px",
+            border: "none",
+            background: "#6c757d",
+            color: "white",
+            cursor: "pointer",
+            fontWeight: 800,
+            boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
+          }}
+        >
+          로그아웃
+        </button>
+      </div>
 
       {isAddMarkerMode && (
         <div
