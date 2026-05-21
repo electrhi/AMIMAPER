@@ -5074,10 +5074,27 @@ useEffect(() => {
           right: 14,
           zIndex: 999999,
           display: "flex",
+          flexDirection: "column",
           gap: 8,
-          alignItems: "center",
+          alignItems: "flex-end",
         }}
       >
+        <button
+          onClick={handleLogout}
+          style={{
+            padding: "10px 14px",
+            borderRadius: "10px",
+            border: "none",
+            background: "#6c757d",
+            color: "white",
+            cursor: "pointer",
+            fontWeight: 800,
+            boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
+          }}
+        >
+          로그아웃
+        </button>
+
         <button
           onClick={() => {
             setIsAddMarkerMode((v) => {
@@ -5099,29 +5116,13 @@ useEffect(() => {
         >
           {isAddMarkerMode ? "✕ 추가 취소" : "➕ 추가"}
         </button>
-
-        <button
-          onClick={handleLogout}
-          style={{
-            padding: "10px 14px",
-            borderRadius: "10px",
-            border: "none",
-            background: "#6c757d",
-            color: "white",
-            cursor: "pointer",
-            fontWeight: 800,
-            boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
-          }}
-        >
-          로그아웃
-        </button>
       </div>
 
       {isAddMarkerMode && (
         <div
           style={{
             position: "fixed",
-            top: 58,
+            top: 110,
             right: 14,
             zIndex: 999999,
             background: "rgba(255,255,255,0.95)",
