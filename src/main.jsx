@@ -8,6 +8,32 @@ const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_KEY;
 const KAKAO_KEY = import.meta.env.VITE_KAKAO_JAVASCRIPT_KEY;
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
+// ✅ 운영 화면에서 브라우저 콘솔에 DEBUG/WARN 로그가 보이지 않도록 기본 비활성화
+//    필요 시 아래 값을 true로 바꾸면 기존 로그를 다시 확인할 수 있습니다.
+const APP_DEBUG = false;
+const debugLog = (...args) => {
+  if (APP_DEBUG) console.log(...args);
+};
+const debugWarn = (...args) => {
+  if (APP_DEBUG) console.warn(...args);
+};
+const debugError = (...args) => {
+  if (APP_DEBUG) console.error(...args);
+};
+const debugCount = (...args) => {
+  if (APP_DEBUG) console.count(...args);
+};
+const debugGroupCollapsed = (...args) => {
+  if (APP_DEBUG) console.groupCollapsed(...args);
+};
+const debugTable = (...args) => {
+  if (APP_DEBUG) console.table(...args);
+};
+const debugGroupEnd = (...args) => {
+  if (APP_DEBUG) console.groupEnd(...args);
+};
+
+
 // ✅ 계기번호 공통 정규화 함수 (모든 종류의 공백/제로폭문자 제거)
 const normalizeMeterId = (id) =>
   String(id ?? "")
@@ -299,7 +325,7 @@ function AdminPage({ currentUser, onBack }) {
       if (error) throw error;
       setUsers(data || []);
     } catch (err) {
-      console.error("[ADMIN][USERS] fetch 실패:", err.message);
+      debugError("[ADMIN][USERS] fetch 실패:", err.message);
       alert(`사용자 목록 조회 실패: ${err.message}`);
     } finally {
       setLoadingUsers(false);
@@ -323,7 +349,7 @@ function AdminPage({ currentUser, onBack }) {
       ]);
 
       if (metaRes.error) {
-        console.warn("[ADMIN][FILES][META] 조회 경고:", metaRes.error.message);
+        debugWarn("[ADMIN][FILES][META] 조회 경고:", metaRes.error.message);
       }
       if (storageRes.error) throw storageRes.error;
 
@@ -379,7 +405,7 @@ function AdminPage({ currentUser, onBack }) {
 
       setFiles(merged);
     } catch (err) {
-      console.error("[ADMIN][FILES] fetch 실패:", err.message);
+      debugError("[ADMIN][FILES] fetch 실패:", err.message);
       alert(`파일 목록 조회 실패: ${err.message}`);
     } finally {
       setLoadingFiles(false);
@@ -442,7 +468,7 @@ function AdminPage({ currentUser, onBack }) {
       setEditing(null);
       alert("사용자 정보가 저장되었습니다.");
     } catch (err) {
-      console.error("[ADMIN][USERS] save 실패:", err.message);
+      debugError("[ADMIN][USERS] save 실패:", err.message);
       alert(`사용자 저장 실패: ${err.message}`);
     } finally {
       setSavingUserId(null);
@@ -459,7 +485,7 @@ function AdminPage({ currentUser, onBack }) {
       if (error) throw error;
       await fetchUsers();
     } catch (err) {
-      console.error("[ADMIN][ASSIGN] 실패:", err.message);
+      debugError("[ADMIN][ASSIGN] 실패:", err.message);
       alert(`파일 배정 실패: ${err.message}`);
     }
   };
@@ -497,7 +523,7 @@ function AdminPage({ currentUser, onBack }) {
           fetchFiles();
         }
       } catch (err) {
-        console.error("[ADMIN][POLL] 실패:", err.message);
+        debugError("[ADMIN][POLL] 실패:", err.message);
       }
     }, 1200);
   };
@@ -590,7 +616,7 @@ function AdminPage({ currentUser, onBack }) {
       await fetchFiles();
       startPolling(safeOriginalName);
     } catch (err) {
-      console.error("[ADMIN][UPLOAD] 실패:", err.message);
+      debugError("[ADMIN][UPLOAD] 실패:", err.message);
 
       setUploadProgress((prev) => ({
         ...prev,
@@ -1563,7 +1589,7 @@ const noCoordRows = React.useMemo(() => {
   };
 
 
-  console.log("[DEBUG][SUPABASE_URL]", SUPABASE_URL);
+  debugLog("[DEBUG][SUPABASE_URL]", SUPABASE_URL);
 
     // ➕ 임의 마커 추가 모드
   const [isAddMarkerMode, setIsAddMarkerMode] = useState(false);
@@ -1594,7 +1620,7 @@ const noCoordRows = React.useMemo(() => {
       .limit(5000);
 
     if (error) {
-      console.error("[ERROR][CUSTOM] fetch:", error.message);
+      debugError("[ERROR][CUSTOM] fetch:", error.message);
       return;
     }
     if (seq !== customMarkersFetchSeqRef.current) return;
@@ -1696,7 +1722,7 @@ const clearSearchTemp = () => {
         await upsertCustomMarkerToDB(markerObj);
         await fetchCustomMarkersFromDB(true);
       } catch (e) {
-        console.error("[ERROR][CUSTOM][FROM_SEARCH] insert:", e.message);
+        debugError("[ERROR][CUSTOM][FROM_SEARCH] insert:", e.message);
       } finally {
         clearSearchTemp();
       }
@@ -1790,8 +1816,8 @@ useEffect(() => {
   if (window.__printed_latlng_debug) return;
   window.__printed_latlng_debug = true;
 
-  console.log("========== [LAT/LNG DEBUG START] ==========");
-  console.log(
+  debugLog("========== [LAT/LNG DEBUG START] ==========");
+  debugLog(
     data.slice(0, 20).map((r) => ({
       meter_id: r?.meter_id,
       lat_raw: r?.lat,
@@ -1802,8 +1828,8 @@ useEffect(() => {
       lng_isFinite: Number.isFinite(Number(r?.lng)),
     }))
   );
-  console.log("TOTAL rows:", data.length);
-  console.log("========== [LAT/LNG DEBUG END] ==========");
+  debugLog("TOTAL rows:", data.length);
+  debugLog("========== [LAT/LNG DEBUG END] ==========");
 }, [data]);
 
 
@@ -1836,7 +1862,7 @@ const fetchMetersStatusByIds = async (meterIds) => {
   const ids = Array.from(new Set((meterIds || []).map(normalizeMeterId))).filter(Boolean);
   if (ids.length === 0) return;
 
-  console.count("[DEBUG][FETCH] meters by ids"); // ✅ 호출 위치/횟수 추적
+  debugCount("[DEBUG][FETCH] meters by ids"); // ✅ 호출 위치/횟수 추적
 
   const dataFile = currentUser?.data_file;
   if (!dataFile) return; // ✅ 여기서 한번만 체크
@@ -1855,7 +1881,7 @@ const { data: chunkRows, error } = await supabase
   .in("meter_id", part);
 
     if (error) {
-      console.error("[ERROR][FETCH] meters:", error.message);
+      debugError("[ERROR][FETCH] meters:", error.message);
       return;
     }
     rows = rows.concat(chunkRows || []);
@@ -1897,7 +1923,7 @@ const { data: chunkRows, error } = await supabase
   /** 🔐 수동 로그인 처리 **/
   const handleLogin = async (e) => {
     e.preventDefault();
-    console.log("[DEBUG][LOGIN] 로그인 시도:", user);
+    debugLog("[DEBUG][LOGIN] 로그인 시도:", user);
 
     const { data: users, error } = await supabase
       .from("users")
@@ -1905,109 +1931,36 @@ const { data: chunkRows, error } = await supabase
       .eq("id", user);
 
     if (error) {
-      console.error("[ERROR][LOGIN] Supabase 오류:", error.message);
+      debugError("[ERROR][LOGIN] Supabase 오류:", error.message);
       return alert("로그인 오류 발생");
     }
 
     if (users && users.length > 0 && users[0].password === password) {
       const userData = users[0];
-      console.log("[DEBUG][LOGIN] ✅ 로그인 성공:", userData);
+      debugLog("[DEBUG][LOGIN] ✅ 로그인 성공:", userData);
 
       // ✅ 로컬에 user id 저장 → 다음 접속 시 자동 로그인에 사용
       try {
         localStorage.setItem("amimap_user_id", userData.id);
-        console.log("[DEBUG][AUTH] 로컬스토리지에 사용자 ID 저장:", userData.id);
+        debugLog("[DEBUG][AUTH] 로컬스토리지에 사용자 ID 저장:", userData.id);
       } catch (err) {
-        console.warn("[WARN][AUTH] 로컬스토리지 저장 실패:", err?.message);
+        debugWarn("[WARN][AUTH] 로컬스토리지 저장 실패:", err?.message);
       }
 
       setCurrentUser(userData);
       await loadData(userData.data_file);
       setLoggedIn(true);
     } else {
-      console.warn("[DEBUG][LOGIN] ❌ 로그인 실패");
+      debugWarn("[DEBUG][LOGIN] ❌ 로그인 실패");
       alert("로그인 실패");
     }
-  };
-
-
-  /** 🔓 로그아웃 처리 **/
-  const handleLogout = () => {
-    console.log("[DEBUG][AUTH] 로그아웃");
-
-    // ✅ 자동 로그인 방지: 저장된 사용자 ID 제거
-    try {
-      localStorage.removeItem("amimap_user_id");
-      console.log("[DEBUG][AUTH] 로컬스토리지 사용자 ID 제거 완료");
-    } catch (err) {
-      console.warn("[WARN][AUTH] 로컬스토리지 삭제 실패:", err?.message);
-    }
-
-    // ✅ 현재 지도/위치/오버레이 상태만 정리하고, 기존 기능 로직은 유지
-    try {
-      if (myLocationWatchIdRef.current != null && navigator.geolocation) {
-        navigator.geolocation.clearWatch(myLocationWatchIdRef.current);
-      }
-    } catch {}
-    myLocationWatchIdRef.current = null;
-
-    try { myLocationOverlayRef.current?.setMap(null); } catch {}
-    myLocationOverlayRef.current = null;
-    myLocationArrowElRef.current = null;
-    myLastPosRef.current = null;
-    myLastHeadingRef.current = null;
-
-    try { markersRef.current.forEach((m) => m.setMap(null)); } catch {}
-    markersRef.current = [];
-
-    try { addressOverlaysRef.current.forEach((ov) => ov.setMap(null)); } catch {}
-    addressOverlaysRef.current = [];
-
-    try { otherUserOverlays.current.forEach((ov) => ov.setMap(null)); } catch {}
-    otherUserOverlays.current = [];
-
-    try { clearCustomMarkerObjects(); } catch {}
-    try { cleanupDraftMarker(); } catch {}
-    try { closeCustomEditOverlay(); } catch {}
-    try { clearSearchTemp(); } catch {}
-    try {
-      const ov = getActiveOverlay();
-      if (ov) ov.setMap(null);
-      setActiveOverlay(null);
-    } catch {}
-
-    overlayByKeyRef.current.clear();
-    meterToKeyRef.current.clear();
-    labelByKeyRef.current.clear();
-    metersCacheRef.current.clear();
-    buildingNameCacheRef.current.clear();
-
-    setIsAddMarkerMode(false);
-    setCustomMarkers([]);
-    setSearchPanelOpen(false);
-    setSearchOpen(false);
-    setSearchResults([]);
-    setSearchText("");
-    setFilterPanelOpen(false);
-    setNoCoordModalOpen(false);
-
-    setScreen("map");
-    setMap(null);
-    setData([]);
-    dataRef.current = [];
-    setGeoCache({});
-    setCounts({ 완료: 0, 불가: 0, 미방문: 0 });
-    setCurrentUser(null);
-    setUser("");
-    setPassword("");
-    setLoggedIn(false);
   };
 
   /** 🔐 앱 시작 시 자동 로그인 시도 **/
   useEffect(() => {
     const autoLogin = async () => {
       if (loggedIn) {
-        console.log("[DEBUG][AUTH] 이미 로그인 상태 — 자동 로그인 스킵");
+        debugLog("[DEBUG][AUTH] 이미 로그인 상태 — 자동 로그인 스킵");
         return;
       }
 
@@ -2015,15 +1968,15 @@ const { data: chunkRows, error } = await supabase
       try {
         savedId = localStorage.getItem("amimap_user_id");
       } catch (err) {
-        console.warn("[WARN][AUTH] 로컬스토리지 접근 실패:", err?.message);
+        debugWarn("[WARN][AUTH] 로컬스토리지 접근 실패:", err?.message);
       }
 
       if (!savedId) {
-        console.log("[DEBUG][AUTH] 저장된 사용자 ID 없음 — 자동 로그인 안 함");
+        debugLog("[DEBUG][AUTH] 저장된 사용자 ID 없음 — 자동 로그인 안 함");
         return;
       }
 
-      console.log("[DEBUG][AUTH] 자동 로그인 시도 — 저장된 ID:", savedId);
+      debugLog("[DEBUG][AUTH] 자동 로그인 시도 — 저장된 ID:", savedId);
 
       const { data: users, error } = await supabase
         .from("users")
@@ -2031,7 +1984,7 @@ const { data: chunkRows, error } = await supabase
         .eq("id", savedId);
 
       if (error) {
-        console.error(
+        debugError(
           "[ERROR][AUTH] 자동 로그인 중 Supabase 오류:",
           error.message
         );
@@ -2039,7 +1992,7 @@ const { data: chunkRows, error } = await supabase
       }
 
       if (!users || users.length === 0) {
-        console.warn(
+        debugWarn(
           "[WARN][AUTH] 저장된 ID에 해당하는 사용자를 찾지 못함 → 로컬 정보 제거"
         );
         try {
@@ -2049,7 +2002,7 @@ const { data: chunkRows, error } = await supabase
       }
 
       const userData = users[0];
-      console.log("[DEBUG][AUTH] ✅ 자동 로그인 사용자 데이터:", userData);
+      debugLog("[DEBUG][AUTH] ✅ 자동 로그인 사용자 데이터:", userData);
 
       setCurrentUser(userData);
       await loadData(userData.data_file);
@@ -2063,11 +2016,11 @@ const { data: chunkRows, error } = await supabase
   const loadData = async (fileName) => {
     try {
       if (!hasUsableDataFile(fileName)) {
-        console.log("[DEBUG][DATA] 📂 사용할 엑셀 파일이 없어 로드를 건너뜀:", fileName);
+        debugLog("[DEBUG][DATA] 📂 사용할 엑셀 파일이 없어 로드를 건너뜀:", fileName);
         setData([]);
         return;
       }
-      console.log("[DEBUG][DATA] 📂 엑셀 로드 시작:", fileName);
+      debugLog("[DEBUG][DATA] 📂 엑셀 로드 시작:", fileName);
       const { data: excelBlob, error } = await supabase.storage
         .from("excels")
         .download(fileName);
@@ -2077,7 +2030,7 @@ const { data: chunkRows, error } = await supabase
       const workbook = XLSX.read(blob, { type: "array" });
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
       const json = XLSX.utils.sheet_to_json(sheet);
-      console.log("[DEBUG][DATA] 📊 엑셀 데이터:", json.length, "행");
+      debugLog("[DEBUG][DATA] 📊 엑셀 데이터:", json.length, "행");
 
       // 1) 엑셀에서는 상태(status)를 더 이상 쓰지 않음
       const baseData = json.map((r) => ({
@@ -2133,17 +2086,17 @@ rows.forEach((d) => {
 
       setData(merged);
 
-      console.log("[DEBUG][DATA] ✅ 병합 완료:", merged.length);
+      debugLog("[DEBUG][DATA] ✅ 병합 완료:", merged.length);
       requestFullRender.current();
     } catch (e) {
-      console.error("[ERROR][DATA] 엑셀 로드 실패:", e.message);
+      debugError("[ERROR][DATA] 엑셀 로드 실패:", e.message);
     }
   };
 
   /** Kakao 지도 초기화 **/
   useEffect(() => {
     if (!loggedIn || screen !== "map") return;
-    console.log("[DEBUG][MAP] 🗺️ Kakao 지도 로드 중...");
+    debugLog("[DEBUG][MAP] 🗺️ Kakao 지도 로드 중...");
 
     const initMap = () => {
       const mapContainer = document.getElementById("map");
@@ -2187,7 +2140,7 @@ rows.forEach((d) => {
   if (!hasUsableDataFile(currentUser?.data_file)) return;
 
   const syncInViewOnce = async () => {
-    console.count("[DEBUG][FETCH] initial sync in view");
+    debugCount("[DEBUG][FETCH] initial sync in view");
 
     const b = map.getBounds();
     const sw = b.getSouthWest();
@@ -2229,43 +2182,43 @@ rows.forEach((d) => {
 
     const loadGeoCache = async () => {
       try {
-        console.log(`[DEBUG][CACHE] 📦 캐시 불러오기 시도: ${GEO_CACHE_FILE}`);
+        debugLog(`[DEBUG][CACHE] 📦 캐시 불러오기 시도: ${GEO_CACHE_FILE}`);
         const { data: cacheBlob, error } = await supabase.storage
           .from("excels")
           .download(GEO_CACHE_FILE);
 
         if (error) {
-          console.warn("[DEBUG][CACHE] ❌ 캐시 없음 — 새로 생성 예정");
+          debugWarn("[DEBUG][CACHE] ❌ 캐시 없음 — 새로 생성 예정");
           setGeoCache({});
           return;
         }
 
-        console.log(
+        debugLog(
           `[DEBUG][CACHE] ✅ Blob 수신 완료 — 크기: ${cacheBlob.size.toLocaleString()} bytes`
         );
 
         const arrayBuffer = await cacheBlob.arrayBuffer();
-        console.log(
+        debugLog(
           `[DEBUG][CACHE] ✅ ArrayBuffer 생성 완료 — 길이: ${arrayBuffer.byteLength.toLocaleString()}`
         );
 
         const decoder = new TextDecoder("utf-8");
         const text = decoder.decode(arrayBuffer);
-        console.log(
+        debugLog(
           `[DEBUG][CACHE] ✅ TextDecoder 변환 완료 — 문자열 길이: ${text.length.toLocaleString()}`
         );
 
-        console.log("[DEBUG][CACHE] 📄 JSON 시작 부분 미리보기 ↓");
-        console.log(text.slice(0, 300));
-        console.log("[DEBUG][CACHE] 📄 JSON 끝 부분 미리보기 ↓");
-        console.log(text.slice(-300));
+        debugLog("[DEBUG][CACHE] 📄 JSON 시작 부분 미리보기 ↓");
+        debugLog(text.slice(0, 300));
+        debugLog("[DEBUG][CACHE] 📄 JSON 끝 부분 미리보기 ↓");
+        debugLog(text.slice(-300));
 
         let parsed;
         try {
           parsed = JSON.parse(text);
         } catch (err) {
-          console.error("[ERROR][CACHE] ❌ JSON 파싱 실패:", err.message);
-          console.log("[DEBUG][CACHE] ⚠️ 텍스트 일부:", text.slice(0, 500));
+          debugError("[ERROR][CACHE] ❌ JSON 파싱 실패:", err.message);
+          debugLog("[DEBUG][CACHE] ⚠️ 텍스트 일부:", text.slice(0, 500));
           return;
         }
 
@@ -2279,20 +2232,20 @@ rows.forEach((d) => {
         }
 
         if (unwrapDepth > 0) {
-          console.log(`[DEBUG][CACHE] ⚙️ 중첩 구조 ${unwrapDepth}회 언랩 처리됨`);
+          debugLog(`[DEBUG][CACHE] ⚙️ 중첩 구조 ${unwrapDepth}회 언랩 처리됨`);
         }
 
         const keyCount = Object.keys(parsed).length;
-        console.log(`[DEBUG][CACHE] ✅ ${keyCount}개 캐시 로드`);
+        debugLog(`[DEBUG][CACHE] ✅ ${keyCount}개 캐시 로드`);
 
         if (keyCount < 50) {
-          console.warn(
+          debugWarn(
             "[WARN][CACHE] ⚠️ 캐시 수가 비정상적으로 적음 — JSON 일부만 읽혔을 수 있음"
           );
         }
 
         const sampleKeys = Object.keys(parsed).slice(0, 5);
-        console.log("[DEBUG][CACHE] 🔍 샘플 키 5개:", sampleKeys);
+        debugLog("[DEBUG][CACHE] 🔍 샘플 키 5개:", sampleKeys);
 
         const cleanedCache = {};
         Object.entries(parsed).forEach(([k, v]) => {
@@ -2303,7 +2256,7 @@ rows.forEach((d) => {
 
         requestFullRender.current();
       } catch (err) {
-        console.error("[ERROR][CACHE] 캐시 로드 실패:", err.message);
+        debugError("[ERROR][CACHE] 캐시 로드 실패:", err.message);
       }
     };
 
@@ -2315,14 +2268,14 @@ rows.forEach((d) => {
   /** 주소 → 좌표 변환 (Python 캐시만 사용, Kakao 지오코딩 호출 X) **/
   const geocodeAddress = async (address) => {
     if (!address || address.trim() === "") {
-      console.warn("[WARN][GEO] 주소 비어있음");
+      debugWarn("[WARN][GEO] 주소 비어있음");
       return null;
     }
     if (geoCache[address]) {
-      console.log(`[DEBUG][GEO] 💾 캐시 HIT: ${address}`);
+      debugLog(`[DEBUG][GEO] 💾 캐시 HIT: ${address}`);
       return geoCache[address];
     }
-    console.warn(`[WARN][GEO] ❌ 캐시에 없는 주소 → ${address}`);
+    debugWarn(`[WARN][GEO] ❌ 캐시에 없는 주소 → ${address}`);
     return null;
   };
 
@@ -2335,7 +2288,7 @@ rows.forEach((d) => {
         ? window.kakao.maps.MapTypeId.ROADMAP
         : window.kakao.maps.MapTypeId.HYBRID
     );
-    console.log(`[DEBUG][MAP] 🗺️ 지도 타입 변경 → ${newType}`);
+    debugLog(`[DEBUG][MAP] 🗺️ 지도 타입 변경 → ${newType}`);
     setMapType(newType);
   };
 
@@ -2388,7 +2341,7 @@ rows.forEach((d) => {
       window.open(pcRouteUrl, "_blank", "noopener,noreferrer");
     },
     (err) => {
-      console.warn("[WARN][NAVI] 현재 위치를 가져오지 못함:", err?.message);
+      debugWarn("[WARN][NAVI] 현재 위치를 가져오지 못함:", err?.message);
 
       const fallbackUrl = isMobile
         ? `https://m.map.kakao.com/scheme/look?p=${destLat},${destLng}`
@@ -2408,14 +2361,14 @@ rows.forEach((d) => {
   
   /** 마커 개수 필터 적용 버튼 **/
   const handleApplyFilter = () => {
-    console.log("[DEBUG][FILTER] 적용 시도, minMarkerCount =", minMarkerCount);
+    debugLog("[DEBUG][FILTER] 적용 시도, minMarkerCount =", minMarkerCount);
     requestFullRender.current();
   };
 
 /** 최신 상태 가져오기 (DB 읽기 - 필요한 것만) **/
 const fetchLatestStatus = async (meterIds = null) => {
   try {
-    console.log("[DEBUG][SYNC] 🔄 최신 상태 동기화...");
+    debugLog("[DEBUG][SYNC] 🔄 최신 상태 동기화...");
 
     const ids = meterIds
       ? meterIds.map(normalizeMeterId).filter(Boolean)
@@ -2426,9 +2379,9 @@ const fetchLatestStatus = async (meterIds = null) => {
     // ✅ 기존 최신화 타이밍에 임의 마커도 같이 최신화(실시간 X, 내부 throttling)
     await fetchCustomMarkersFromDB(false);
 
-    console.log("[DEBUG][SYNC] ✅ 최신 상태 반영 완료");
+    debugLog("[DEBUG][SYNC] ✅ 최신 상태 반영 완료");
   } catch (err) {
-    console.error("[ERROR][SYNC] 상태 갱신 실패:", err.message);
+    debugError("[ERROR][SYNC] 상태 갱신 실패:", err.message);
   }
 };
 
@@ -2826,7 +2779,7 @@ const runSearch = () => {
     }
   });
 
-  console.log(`[DEBUG][MAP] 🟢 반경 1km 내 ${updatedCount}개 마커 색상만 변경`);
+  debugLog(`[DEBUG][MAP] 🟢 반경 1km 내 ${updatedCount}개 마커 색상만 변경`);
 };
 
 
@@ -2835,7 +2788,7 @@ const runSearch = () => {
     if (!geoCache || Object.keys(geoCache).length === 0) return;
     if (!data || data.length === 0) return;
 
-    console.log("[DEBUG][GEO] 🔄 geoCache 매칭 시작 (유사 주소 매칭 포함)");
+    debugLog("[DEBUG][GEO] 🔄 geoCache 매칭 시작 (유사 주소 매칭 포함)");
 
     const normalizeAddr = (str) =>
       str
@@ -2929,13 +2882,13 @@ const runSearch = () => {
       };
     });
 
-    console.log(
+    debugLog(
       `[DEBUG][GEO] ✅ geoCache 매칭 완료: ${matchedCount}/${matchedData.length}건`
     );
     if (failedSamples.length > 0) {
-      console.groupCollapsed("[DEBUG][GEO] ❌ 매칭 실패 샘플");
-      console.table(failedSamples);
-      console.groupEnd();
+      debugGroupCollapsed("[DEBUG][GEO] ❌ 매칭 실패 샘플");
+      debugTable(failedSamples);
+      debugGroupEnd();
     }
 
     const hasLayoutChange = matchedData.some((row, idx) => {
@@ -2961,21 +2914,21 @@ const runSearch = () => {
   const renderMarkers = async () => {
     try {
       if (!map || !data.length) {
-        console.warn("[DEBUG][MAP] ❌ 지도나 데이터가 아직 준비되지 않음");
+        debugWarn("[DEBUG][MAP] ❌ 지도나 데이터가 아직 준비되지 않음");
         return;
       }
 
-      console.log("[DEBUG][MAP] 🔄 마커 렌더링 시작...");
+      debugLog("[DEBUG][MAP] 🔄 마커 렌더링 시작...");
 
       // ✅ 마커 개수 필터 값 파싱 (입력 비었거나 0 이하면 필터 끔)
       const threshold = parseInt(minMarkerCount, 10);
       const useSizeFilter = !isNaN(threshold) && threshold > 0;
       if (useSizeFilter) {
-        console.log(
+        debugLog(
           `[DEBUG][FILTER] 최소 ${threshold}개 이상인 마커만 표시`
         );
       } else {
-        console.log("[DEBUG][FILTER] 필터 미사용(전체 표시)");
+        debugLog("[DEBUG][FILTER] 필터 미사용(전체 표시)");
       }
 
       // 기존 마커 제거
@@ -3013,7 +2966,7 @@ const runSearch = () => {
 
 
 
-      console.log(
+      debugLog(
         `[DEBUG][MAP] ✅ 데이터 정제 완료 — ${filteredForMap.length}건 처리 중...`
       );
 
@@ -3189,7 +3142,7 @@ const runSearch = () => {
             if (ov) {
               ov.setMap(null);
               setActiveOverlay(null);
-              console.log("[DEBUG][POPUP] ✕ 버튼 클릭 — 팝업 닫힘");
+              debugLog("[DEBUG][POPUP] ✕ 버튼 클릭 — 팝업 닫힘");
             }
           });
           popupEl.appendChild(closeBtn);
@@ -3324,7 +3277,7 @@ const runSearch = () => {
 
                 if (navigator.clipboard && navigator.clipboard.writeText) {
                   navigator.clipboard.writeText(meterIdToCopy).catch((err) => {
-                    console.warn("[DEBUG][COPY] 실패:", err);
+                    debugWarn("[DEBUG][COPY] 실패:", err);
                     alert("복사에 실패했습니다. 다시 시도해주세요.");
                   });
                 } else {
@@ -3399,9 +3352,9 @@ const runSearch = () => {
         markerEl.addEventListener("pointerdown", openPopup);
       });
 
-      console.log(`[DEBUG][MAP] ✅ 마커 ${markerCount}개 렌더링 완료`);
+      debugLog(`[DEBUG][MAP] ✅ 마커 ${markerCount}개 렌더링 완료`);
     } catch (e) {
-      console.error("[ERROR][MAP] 마커 렌더링 실패:", e);
+      debugError("[ERROR][MAP] 마커 렌더링 실패:", e);
     }
   };
 
@@ -3624,7 +3577,7 @@ const openCustomMarkerEditor = (markerObj) => {
         await upsertCustomMarkerToDB(nextObj);
         await fetchCustomMarkersFromDB(true);
       } catch (err) {
-        console.error("[ERROR][CUSTOM] update:", err.message);
+        debugError("[ERROR][CUSTOM] update:", err.message);
       }
     })();
 
@@ -3661,7 +3614,7 @@ const openCustomMarkerEditor = (markerObj) => {
       await deleteCustomMarkerFromDB(targetId);
       await fetchCustomMarkersFromDB(true);
     } catch (err) {
-      console.error("[ERROR][CUSTOM] delete:", err.message);
+      debugError("[ERROR][CUSTOM] delete:", err.message);
     }
   })();
 };
@@ -3880,7 +3833,7 @@ useEffect(() => {
               await upsertCustomMarkerToDB(markerObj);
               await fetchCustomMarkersFromDB(true);
             } catch (e) {
-              console.error("[ERROR][CUSTOM] insert:", e.message);
+              debugError("[ERROR][CUSTOM] insert:", e.message);
             } finally {
               cleanupDraftMarker(); // ✅ 임시 마커 제거
             }
@@ -3934,14 +3887,14 @@ useEffect(() => {
         )
       );
     } catch (e) {
-      console.error("[ERROR][NOCOORD STATUS] 저장 실패:", e.message);
+      debugError("[ERROR][NOCOORD STATUS] 저장 실패:", e.message);
     }
   };
 
   /** 상태 업데이트 (버튼 클릭 시만 DB 업로드, 상태 흐름: 미방문 > 교체 > 완료 | 불가) **/
   const updateStatus = async (meterIds, newStatus, coords) => {
     try {
-      console.log(
+      debugLog(
         "[DEBUG][STATUS] 🛠️ 상태 업데이트 시도:",
         meterIds,
         "→",
@@ -3994,13 +3947,13 @@ const { error: lastLocError } = await supabase
 
 // ✅ 임시 해결: view라서 저장이 실패할 수 있으니, throw 하지 말고 경고만 찍고 계속 진행
 if (lastLocError) {
-  console.warn(
+  debugWarn(
     "[WARN][LASTLOC] user_last_locations 저장 실패(무시):",
     lastLocError.message
   );
 }
 
-console.log("[DEBUG][STATUS] ✅ DB 업데이트 완료:", payload);
+debugLog("[DEBUG][STATUS] ✅ DB 업데이트 완료:", payload);
 
 // ✅ 화면 즉시 반영(낙관적 업데이트)
 const idSet = new Set(meterIds.map(normalizeMeterId));
@@ -4031,15 +3984,16 @@ if (overlay) {
   setActiveOverlay(null);
 }
 
-console.log("[DEBUG][STATUS] 🔁 전체 지도 최신화 완료");
+debugLog("[DEBUG][STATUS] 🔁 전체 지도 최신화 완료");
 
     } catch (e) {
-      console.error("[ERROR][STATUS] 저장 실패:", e.message);
+      debugError("[ERROR][STATUS] 저장 실패:", e.message);
     }
   };
 
 /** ✅ 다른 사용자 마지막 위치 불러오기
- *  - 관리자(isAdmin): data_file 무시하고 전체 유저의 "마지막 위치"만 표시
+ *  - 관리자(isAdmin): users.worker_type 이 입력된 일반사용자의 "마지막 위치"만 표시
+ *  - data_file 이 EMPTY/공백이어도 worker_type 이 있으면 표시
  *  - (user_last_locations에 data_file별로 행이 여러개 있을 수 있으니 user_id별 최신 1개로 압축)
  */
 
@@ -4050,26 +4004,32 @@ console.log("[DEBUG][STATUS] 🔁 전체 지도 최신화 완료");
   otherUserOverlays.current.forEach((ov) => ov.setMap(null));
   otherUserOverlays.current = [];
 
-  // 1) users 테이블에서 data_file 이 비어있지 않은 사용자만 추림
+  // 1) users 테이블에서 worker_type 이 입력된 일반사용자만 추림
   const { data: userRows, error: userError } = await supabase
     .from("users")
-    .select("id,data_file");
+    .select("id,data_file,worker_type");
 
   if (userError) {
-    console.error("[ERROR][OTHERS] users:", userError.message);
+    debugError("[ERROR][OTHERS] users:", userError.message);
     return;
   }
 
+  const workerTypeByUser = new Map();
   const allowedUserIds = new Set(
     (userRows || [])
       .filter((u) => {
-        const df = String(u?.data_file ?? "").trim();
-        return df !== "" && df.toUpperCase() !== "EMPTY";
+        const workerType = String(u?.worker_type ?? "").trim();
+        if (!workerType || workerType.toUpperCase() === "NULL") return false;
+        return workerType !== USER_ROLE.ADMIN;
       })
-      .map((u) => String(u.id))
+      .map((u) => {
+        const uid = String(u.id);
+        workerTypeByUser.set(uid, String(u?.worker_type ?? "").trim());
+        return uid;
+      })
   );
 
-  console.log("[DEBUG][OTHERS] allowed users:", allowedUserIds.size);
+  debugLog("[DEBUG][OTHERS] worker_type users:", allowedUserIds.size);
 
   // 2) 마지막 위치 조회
   const { data: rows, error } = await supabase
@@ -4080,21 +4040,30 @@ console.log("[DEBUG][STATUS] 🔁 전체 지도 최신화 완료");
     .limit(5000);
 
   if (error) {
-    console.error("[ERROR][OTHERS] user_last_locations:", error.message);
+    debugError("[ERROR][OTHERS] user_last_locations:", error.message);
     return;
   }
 
-  console.log("[DEBUG][OTHERS] fetched rows:", rows?.length || 0);
+  debugLog("[DEBUG][OTHERS] fetched rows:", rows?.length || 0);
 
   const latestByUser = new Map();
   for (const loc of rows || []) {
     const uid = String(loc?.user_id ?? "").trim();
+    const lat = Number(loc?.lat);
+    const lng = Number(loc?.lng);
 
     if (!uid) continue;
-    if (!allowedUserIds.has(uid)) continue; // ✅ users.data_file 비어있는 사용자 제외
-    if (loc.lat == null || loc.lng == null) continue;
+    if (!allowedUserIds.has(uid)) continue; // ✅ worker_type 이 입력된 일반사용자만 표시
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
 
-    if (!latestByUser.has(uid)) latestByUser.set(uid, loc);
+    if (!latestByUser.has(uid)) {
+      latestByUser.set(uid, {
+        ...loc,
+        lat,
+        lng,
+        worker_type: workerTypeByUser.get(uid) || "",
+      });
+    }
   }
 
   for (const loc of latestByUser.values()) {
@@ -4114,19 +4083,22 @@ console.log("[DEBUG][STATUS] 🔁 전체 지도 최신화 완료");
     `;
 
     markerEl.textContent = loc.user_id;
-    markerEl.title = loc.data_file ? `파일: ${loc.data_file}` : "";
+    markerEl.title = [
+      loc.worker_type ? `역할: ${loc.worker_type}` : "",
+      loc.data_file ? `파일: ${loc.data_file}` : "",
+    ].filter(Boolean).join(" · ");
 
     markerEl.addEventListener("click", (e) => {
       e.stopPropagation();
-      
+
       const destLabel = loc.address || loc.user_id || "목적지";
       const destLat = Number(loc.lat);
       const destLng = Number(loc.lng);
-      
+
       startNavigation(destLabel, destLat, destLng);
     });
 
-    
+
     const overlay = new window.kakao.maps.CustomOverlay({
       position: coord,
       content: markerEl,
@@ -4153,7 +4125,7 @@ useEffect(() => {
     if (!map || !currentUser) return;
 
     if (!navigator.geolocation) {
-      console.warn("[DEBUG][GEO] ⚠️ 이 브라우저는 Geolocation 을 지원하지 않음");
+      debugWarn("[DEBUG][GEO] ⚠️ 이 브라우저는 Geolocation 을 지원하지 않음");
       return;
     }
 
@@ -4234,7 +4206,7 @@ useEffect(() => {
     };
 
     const error = (err) => {
-      console.warn("[DEBUG][GEO] ⚠️ 위치 추적 실패:", err?.message);
+      debugWarn("[DEBUG][GEO] ⚠️ 위치 추적 실패:", err?.message);
     };
 
     const watchId = navigator.geolocation.watchPosition(success, error, {
@@ -5066,63 +5038,38 @@ useEffect(() => {
 </div>
 
 
-      {/* ➕ 임의 마커 추가 버튼 + 로그아웃 버튼 (오른쪽 상단) */}
-      <div
+      {/* ➕ 임의 마커 추가 버튼 (오른쪽 상단) */}
+      <button
+        onClick={() => {
+          setIsAddMarkerMode((v) => {
+            const next = !v;
+            if (!next) cleanupDraftMarker(); // 끌 때 임시 마커/입력창 정리
+            return next;
+          });
+        }}
         style={{
           position: "fixed",
           top: 14,
           right: 14,
           zIndex: 999999,
-          display: "flex",
-          flexDirection: "column",
-          gap: 8,
-          alignItems: "flex-end",
+          padding: "10px 14px",
+          borderRadius: "10px",
+          border: "none",
+          background: isAddMarkerMode ? "#dc3545" : "#28a745",
+          color: "white",
+          cursor: "pointer",
+          fontWeight: 800,
+          boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
         }}
       >
-        <button
-          onClick={handleLogout}
-          style={{
-            padding: "10px 14px",
-            borderRadius: "10px",
-            border: "none",
-            background: "#6c757d",
-            color: "white",
-            cursor: "pointer",
-            fontWeight: 800,
-            boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
-          }}
-        >
-          로그아웃
-        </button>
-
-        <button
-          onClick={() => {
-            setIsAddMarkerMode((v) => {
-              const next = !v;
-              if (!next) cleanupDraftMarker(); // 끌 때 임시 마커/입력창 정리
-              return next;
-            });
-          }}
-          style={{
-            padding: "10px 14px",
-            borderRadius: "10px",
-            border: "none",
-            background: isAddMarkerMode ? "#dc3545" : "#28a745",
-            color: "white",
-            cursor: "pointer",
-            fontWeight: 800,
-            boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
-          }}
-        >
-          {isAddMarkerMode ? "✕ 추가 취소" : "➕ 추가"}
-        </button>
-      </div>
+        {isAddMarkerMode ? "✕ 추가 취소" : "➕ 추가"}
+      </button>
 
       {isAddMarkerMode && (
         <div
           style={{
             position: "fixed",
-            top: 110,
+            top: 58,
             right: 14,
             zIndex: 999999,
             background: "rgba(255,255,255,0.95)",
