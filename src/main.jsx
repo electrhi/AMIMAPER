@@ -1461,6 +1461,15 @@ function App() {
   // ✅ 계기타입 필터(다중 체크): [] 이면 "전체"로 취급
   const [meterTypeFilters, setMeterTypeFilters] = useState([]);
 
+  // ✅ 통신방식 필터(다중 체크): [] 이면 "전체"로 취급
+  const [commTypeFilters, setCommTypeFilters] = useState([]);
+
+  // ✅ 통신방식 필터 표시값 정규화
+  const getCommTypeFilterValue = (row) => {
+    const s = String(row?.comm_type ?? "").trim();
+    return s || "미입력";
+  };
+
   // ✅ 현재 데이터에 존재하는 계기타입 목록(필터 UI용)
   const availableMeterTypes = React.useMemo(() => {
     const s = new Set();
@@ -1471,10 +1480,20 @@ function App() {
     return Array.from(s).sort();
   }, [data]);
 
+  // ✅ 현재 데이터에 존재하는 통신방식 목록(필터 UI용)
+  const availableCommTypes = React.useMemo(() => {
+    const s = new Set();
+    for (const r of data || []) {
+      s.add(getCommTypeFilterValue(r));
+    }
+    return Array.from(s).sort((a, b) => a.localeCompare(b, "ko-KR", { numeric: true }));
+  }, [data]);
+
   // ✅ "표시/숨김이 바뀔 수 있는 필터"가 켜져 있나?
   const isStatusFilterActive =
     statusFilters.length > 0 && statusFilters.length < STATUS_OPTIONS.length;
   const isMeterTypeFilterActive = meterTypeFilters.length > 0;
+  const isCommTypeFilterActive = commTypeFilters.length > 0;
 
 
   // ✅ 주소 라벨 ON/OFF
@@ -1490,26 +1509,13 @@ const pickAddress = (row) => {
   return useRoadAddress && road ? road : jibun;
 };
 
-// ✅ 인입주 정보 표시 문자열
-const getInipjuText = (row) => {
-  const digital = String(row?.inipju_digital ?? "").trim();
-  const inipju = String(row?.inipju ?? "").trim();
-
-  return [
-    digital ? `인입주전산화: ${digital}` : "",
-    inipju ? `인입주: ${inipju}` : "",
-  ]
-    .filter(Boolean)
-    .join(" · ");
-};
-
-// ✅ 주소 라벨 내용을 주소 + 건물명 + 인입주 정보로 구성
+// ✅ 주소 라벨 내용은 주소 + 건물명만 구성
+//    인입주전산화/인입주는 마커 위 라벨에는 표시하지 않고, 마커 클릭 팝업 안에서만 표시
 const setAddressLabelContent = (labelEl, row, buildingName = "") => {
   if (!labelEl) return;
 
   const addressText = pickAddress(row);
   const bname = String(buildingName || row?.building_name || "").trim();
-  const inipjuText = getInipjuText(row);
 
   labelEl.innerHTML = "";
 
@@ -1520,19 +1526,6 @@ const setAddressLabelContent = (labelEl, row, buildingName = "") => {
       : addressText;
   addrDiv.style.cssText = "font-weight:800;";
   labelEl.appendChild(addrDiv);
-
-  if (inipjuText) {
-    const subDiv = document.createElement("div");
-    subDiv.textContent = inipjuText;
-    subDiv.style.cssText = `
-      margin-top:2px;
-      color:#334155;
-      font-size:10px;
-      font-weight:800;
-      line-height:1.25;
-    `;
-    labelEl.appendChild(subDiv);
-  }
 };
 
 
@@ -2735,7 +2728,7 @@ const runSearch = () => {
   if (!map) return;
   requestFullRender.current();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusFilters, meterTypeFilters, showAddressLabels, useRoadAddress]);
+  }, [statusFilters, meterTypeFilters, commTypeFilters, showAddressLabels, useRoadAddress]);
 
   
 
@@ -2831,7 +2824,7 @@ const runSearch = () => {
     if (!meterIds || meterIds.length === 0) return;
 
     // ⚠️ 상태/계기타입 필터가 켜져 있으면 표시/숨김이 바뀔 수 있으니 전체 렌더가 안전
-    if (isStatusFilterActive || isMeterTypeFilterActive) {
+    if (isStatusFilterActive || isMeterTypeFilterActive || isCommTypeFilterActive) {
       requestFullRender.current();
       return;
     }
@@ -3072,27 +3065,32 @@ const runSearch = () => {
         if (!latestPerMeter[d.meter_id]) latestPerMeter[d.meter_id] = d;
       });
       
-      const filteredData = Object.values(latestPerMeter);
+      const allRowsForMap = Object.values(latestPerMeter);
       // ✅ [] 이면 전체로 취급
       const statusSet = statusFilters.length ? new Set(statusFilters) : null;
       const typeSet = meterTypeFilters.length ? new Set(meterTypeFilters) : null;
-      
-      const filteredForMap = filteredData.filter((r) => {
+      const commSet = commTypeFilters.length ? new Set(commTypeFilters) : null;
+
+      // ✅ 필터는 "좌표 그룹을 보일지"만 판단합니다.
+      //    같은 좌표에 조건과 맞는 계기번호가 1개라도 있으면,
+      //    해당 좌표의 전체 계기번호를 마커 숫자/팝업에 그대로 표시합니다.
+      const rowPassesMapFilters = (r) => {
         const visibleStatus = getVisibleStatusByRole(r?.status, currentUserRole);
         const okStatus = !statusSet || statusSet.has(visibleStatus);
         const okType = !typeSet || typeSet.has(getMeterType(r.meter_id));
-        return okStatus && okType;
-      });
+        const okComm = !commSet || commSet.has(getCommTypeFilterValue(r));
+        return okStatus && okType && okComm;
+      };
 
-
+      let matchedRowCount = 0;
 
       debugLog(
-        `[DEBUG][MAP] ✅ 데이터 정제 완료 — ${filteredForMap.length}건 처리 중...`
+        `[DEBUG][MAP] ✅ 데이터 정제 시작 — ${allRowsForMap.length}건 처리 중...`
       );
 
       // 좌표 기준 그룹핑
       const uniqueGroupSet = new Set();
-      for (const row of filteredForMap) {
+      for (const row of allRowsForMap) {
         const address = row?.address;
         const latN = parseFloat(row?.lat);
         const lngN = parseFloat(row?.lng);
@@ -3106,16 +3104,35 @@ const runSearch = () => {
         if (uniqueGroupSet.has(uniqueKey)) continue;
         uniqueGroupSet.add(uniqueKey);
 
-        if (!grouped[key]) grouped[key] = { coords: { lat: latN, lng: lngN }, list: [] };
+        const passesFilters = rowPassesMapFilters(row);
+        if (passesFilters) matchedRowCount += 1;
+
+        if (!grouped[key]) {
+          grouped[key] = {
+            coords: { lat: latN, lng: lngN },
+            list: [],
+            hasFilterMatch: false,
+          };
+        }
+
         grouped[key].list.push(row);
+        if (passesFilters) grouped[key].hasFilterMatch = true;
       }
 
+      debugLog(
+        `[DEBUG][MAP] ✅ 필터 조건 매칭 ${matchedRowCount}건 / 좌표 그룹 ${Object.keys(grouped).length}개`
+      );
 
       let markerCount = 0;
       Object.keys(grouped).forEach((key) => {
-        const { coords, list } = grouped[key];
+        const { coords, list, hasFilterMatch } = grouped[key];
 
-        // ✅ 마커 개수 필터: list.length 가 threshold 미만이면 스킵
+        // ✅ 필터에 맞는 계기번호가 1개도 없는 좌표 그룹은 숨김
+        if (!hasFilterMatch) {
+          return;
+        }
+
+        // ✅ 마커 개수 필터: 필터에 걸린 개수가 아니라 해당 좌표의 전체 계기 개수 기준
         if (useSizeFilter && list.length < threshold) {
           return;
         }
@@ -3293,17 +3310,28 @@ const runSearch = () => {
 
             popupEl.appendChild(title);
 
-            const inipjuLine = document.createElement("div");
-            inipjuLine.textContent = getInipjuText(list[0]);
-            inipjuLine.style.cssText = `
-              margin-top:4px;
-              color:#1f2937;
-              font-weight:800;
-              line-height:1.4;
-            `;
+            // ✅ 인입주 정보는 마커 클릭 팝업 안에서만 2줄로 표시
+            const digitalText = String(list[0]?.inipju_digital ?? "").trim();
+            const inipjuText = String(list[0]?.inipju ?? "").trim();
 
-            if (inipjuLine.textContent) {
-              popupEl.appendChild(inipjuLine);
+            if (digitalText || inipjuText) {
+              const inipjuBox = document.createElement("div");
+              inipjuBox.style.cssText = `
+                margin-top:6px;
+                color:#1f2937;
+                font-weight:800;
+                line-height:1.45;
+              `;
+
+              const digitalLine = document.createElement("div");
+              digitalLine.textContent = `인입주 전산화 : ${digitalText || "-"}`;
+
+              const inipjuLine = document.createElement("div");
+              inipjuLine.textContent = `인입주 : ${inipjuText || "-"}`;
+
+              inipjuBox.appendChild(digitalLine);
+              inipjuBox.appendChild(inipjuLine);
+              popupEl.appendChild(inipjuBox);
             }
 
             popupEl.appendChild(document.createElement("br"));
@@ -4833,6 +4861,73 @@ useEffect(() => {
 
         <div style={{ marginTop: 8, fontSize: isMobile ? "13px" : "12px", color: "#555" }}>
           아무것도 선택 안 하면 전체 표시
+        </div>
+
+        <div style={{ marginTop: 14, borderTop: "1px solid rgba(0,0,0,0.08)", paddingTop: 12 }}>
+          <div style={{ fontWeight: 900, fontSize: isMobile ? "16px" : "14px", marginBottom: 8 }}>
+            통신방식 필터
+          </div>
+
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button
+              onClick={() => setCommTypeFilters([])}
+              style={{
+                padding: isMobile ? "10px 10px" : "7px 8px",
+                borderRadius: "10px",
+                border: "1px solid #ddd",
+                background: commTypeFilters.length === 0 ? "#f1f3f5" : "#fff",
+                fontWeight: 900,
+                cursor: "pointer",
+                fontSize: isMobile ? "13px" : "12px",
+              }}
+            >
+              전체
+            </button>
+
+            {availableCommTypes.length === 0 ? (
+              <div style={{ padding: isMobile ? "10px 10px" : "7px 8px", color: "#64748b", fontSize: isMobile ? "13px" : "12px" }}>
+                통신방식 데이터가 없습니다.
+              </div>
+            ) : (
+              availableCommTypes.map((t) => {
+                const checked = commTypeFilters.length === 0 || commTypeFilters.includes(t);
+
+                const toggle = () => {
+                  setCommTypeFilters((prev) => {
+                    const base = prev.length === 0 ? [...availableCommTypes] : [...prev];
+                    const has = base.includes(t);
+                    const next = has ? base.filter((x) => x !== t) : [...base, t];
+                    return next;
+                  });
+                };
+
+                return (
+                  <label
+                    key={t}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                      cursor: "pointer",
+                      userSelect: "none",
+                      padding: isMobile ? "10px 10px" : "7px 8px",
+                      borderRadius: "10px",
+                      border: "1px solid rgba(0,0,0,0.08)",
+                      background: checked ? "#f1f3f5" : "#fff",
+                      fontWeight: 900,
+                    }}
+                  >
+                    <input type="checkbox" checked={checked} onChange={toggle} style={{ width: 16, height: 16 }} />
+                    <span style={{ fontSize: isMobile ? "14px" : "12px" }}>{t}</span>
+                  </label>
+                );
+              })
+            )}
+          </div>
+
+          <div style={{ marginTop: 8, fontSize: isMobile ? "13px" : "12px", color: "#555" }}>
+            계기 타입 필터와 동시에 적용됩니다. 아무것도 선택 안 하면 전체 표시
+          </div>
         </div>
       </div>
     </div>
