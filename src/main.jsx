@@ -1490,6 +1490,51 @@ const pickAddress = (row) => {
   return useRoadAddress && road ? road : jibun;
 };
 
+// ✅ 인입주 정보 표시 문자열
+const getInipjuText = (row) => {
+  const digital = String(row?.inipju_digital ?? "").trim();
+  const inipju = String(row?.inipju ?? "").trim();
+
+  return [
+    digital ? `인입주전산화: ${digital}` : "",
+    inipju ? `인입주: ${inipju}` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+};
+
+// ✅ 주소 라벨 내용을 주소 + 건물명 + 인입주 정보로 구성
+const setAddressLabelContent = (labelEl, row, buildingName = "") => {
+  if (!labelEl) return;
+
+  const addressText = pickAddress(row);
+  const bname = String(buildingName || row?.building_name || "").trim();
+  const inipjuText = getInipjuText(row);
+
+  labelEl.innerHTML = "";
+
+  const addrDiv = document.createElement("div");
+  addrDiv.textContent =
+    bname && bname !== "__NONE__"
+      ? `${addressText} (${bname})`
+      : addressText;
+  addrDiv.style.cssText = "font-weight:800;";
+  labelEl.appendChild(addrDiv);
+
+  if (inipjuText) {
+    const subDiv = document.createElement("div");
+    subDiv.textContent = inipjuText;
+    subDiv.style.cssText = `
+      margin-top:2px;
+      color:#334155;
+      font-size:10px;
+      font-weight:800;
+      line-height:1.25;
+    `;
+    labelEl.appendChild(subDiv);
+  }
+};
+
 
   // ✅ 미좌표(좌표 없는) 목록 모달
 const [noCoordModalOpen, setNoCoordModalOpen] = useState(false);
@@ -2111,6 +2156,8 @@ const { data: chunkRows, error } = await supabase
         address: r["주소"],
         road_address: r["도로명주소"] || "",
         building_name: r["건물명"] || "",          // ✅ 추가 (Python이 만든 엑셀 컬럼)
+        inipju_digital: r["인입주전산화"] ?? "",   // ✅ 추가: 엑셀 업로드 컬럼
+        inipju: r["인입주"] ?? "",                 // ✅ 추가: 엑셀 업로드 컬럼
         comm_type: r["통신방식"] || "",
         list_no: r["리스트번호"] || "",
         contract_type: r["계약종별"] || "",
@@ -3132,12 +3179,13 @@ const runSearch = () => {
         
         const labelEl = document.createElement("div");
         labelEl.style.cssText = `
-          background: rgba(255,255,255,0.9);
-          border-radius: 4px;
-          padding: 2px 4px;
+          background: rgba(255,255,255,0.92);
+          border-radius: 6px;
+          padding: 3px 5px;
           border: 1px solid #ddd;
           font-size: 11px;
           white-space: nowrap;
+          line-height: 1.25;
           transform: translateY(-4px);
         `;
 
@@ -3151,10 +3199,7 @@ const runSearch = () => {
           buildingNameCacheRef.current.set(key, cachedB);
         }
         
-        labelEl.textContent =
-          cachedB && cachedB !== "__NONE__"
-          ? `${pickAddress(list[0])} (${cachedB})`
-          : pickAddress(list[0]);
+        setAddressLabelContent(labelEl, list[0], cachedB);
 
 
         // ✅ 라벨은 클릭/터치 이벤트를 막고, 아래 마커가 클릭되게 하기
@@ -3247,6 +3292,20 @@ const runSearch = () => {
             title.textContent = pickAddress(list[0]);
 
             popupEl.appendChild(title);
+
+            const inipjuLine = document.createElement("div");
+            inipjuLine.textContent = getInipjuText(list[0]);
+            inipjuLine.style.cssText = `
+              margin-top:4px;
+              color:#1f2937;
+              font-weight:800;
+              line-height:1.4;
+            `;
+
+            if (inipjuLine.textContent) {
+              popupEl.appendChild(inipjuLine);
+            }
+
             popupEl.appendChild(document.createElement("br"));
 
             // ✅ 건물명 표시 줄
@@ -3283,7 +3342,7 @@ const runSearch = () => {
 
                 const lbl = labelByKeyRef.current.get(key);
                 if (lbl?.el) {
-                  lbl.el.textContent = `${pickAddress(list[0])} (${bn})`;
+                  setAddressLabelContent(lbl.el, list[0], bn);
                 }
               })();
             }
