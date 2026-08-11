@@ -130,64 +130,137 @@ const amimapEnhancementsPlugin = () => ({
       "계정별 필터 저장 effect"
     );
 
-    // 4) 주소 라벨에 계기 타입 요약(A/G/E/O) 표시
+    // 4) 기존 지번/도로명 토글을 지번 → 도로명 → 계기 3단 표시 모드로 변경
     code = replaceRequired(
       code,
-      'const setAddressLabelContent = (labelEl, row, buildingName = "") => {',
-      'const setAddressLabelContent = (labelEl, row, buildingName = "", meterRows = []) => {',
-      "주소 라벨 함수 인자"
+      'const [useRoadAddress, setUseRoadAddress] = useState(false);',
+      [
+        'const [addressLabelMode, setAddressLabelMode] = useState("jibun");',
+        'const useRoadAddress = addressLabelMode === "road";',
+      ].join("\n"),
+      "주소/계기 표시 모드 상태"
     );
 
-    const labelAppendAnchor = "  labelEl.appendChild(addrDiv);";
-    const typeSummaryBlock = [
-      "",
-      "  // ✅ 같은 마커에 묶인 계기 타입별 개수 요약",
-      "  const typeCounts = { A: 0, G: 0, E: 0, O: 0 };",
-      "  const shortCodeByType = {",
-      '    "Adv-E": "A",',
-      '    "G-Type": "G",',
-      '    "E-Type": "E",',
-      '    AMIGO: "O",',
-      "  };",
-      "",
-      "  for (const meterRow of meterRows || []) {",
-      "    const shortCode = shortCodeByType[getMeterType(meterRow?.meter_id)];",
-      "    if (shortCode) typeCounts[shortCode] += 1;",
-      "  }",
-      "",
-      '  const typeSummary = ["A", "G", "E", "O"]',
-      "    .filter((code) => typeCounts[code] > 0)",
-      "    .map((code) => `${code}[${typeCounts[code]}]`)",
-      '    .join(" ");',
-      "",
-      "  if (typeSummary) {",
-      '    const typeDiv = document.createElement("div");',
-      "    typeDiv.textContent = typeSummary;",
-      '    typeDiv.style.cssText = "margin-top:2px; font-weight:900; text-align:center;";',
-      "    labelEl.appendChild(typeDiv);",
-      "  }",
-    ].join("\n");
-    code = insertAfterRequired(
+    code = replaceRequired(
       code,
-      labelAppendAnchor,
-      typeSummaryBlock,
-      "계기 타입 요약 라벨"
+      '  }, [statusFilters, meterTypeFilters, commTypeFilters, showAddressLabels, useRoadAddress]);',
+      '  }, [statusFilters, meterTypeFilters, commTypeFilters, showAddressLabels, addressLabelMode]);',
+      "주소/계기 표시 모드 재렌더 의존성"
+    );
+
+    code = replaceRequired(
+      code,
+      '      onClick={() => setUseRoadAddress((v) => !v)}',
+      [
+        '      onClick={() =>',
+        '        setAddressLabelMode((mode) =>',
+        '          mode === "jibun" ? "road" : mode === "road" ? "meter" : "jibun"',
+        '        )',
+        '      }',
+      ].join("\n"),
+      "지번/도로명/계기 버튼 순환"
+    );
+
+    code = replaceRequired(
+      code,
+      '        background: useRoadAddress ? "#f1f3f5" : "#fff",',
+      '        background: addressLabelMode === "jibun" ? "#fff" : "#f1f3f5",',
+      "표시 모드 버튼 배경"
+    );
+
+    code = replaceRequired(
+      code,
+      '      {useRoadAddress ? "도로명" : "지번"}',
+      '      {addressLabelMode === "jibun" ? "지번" : addressLabelMode === "road" ? "도로명" : "계기"}',
+      "표시 모드 버튼 문구"
+    );
+
+    // 5) 계기 모드일 때만 주소 대신 계기 타입 요약(A/G/E/O)을 표시
+    const addressLabelTarget = [
+      'const setAddressLabelContent = (labelEl, row, buildingName = "") => {',
+      '  if (!labelEl) return;',
+      '',
+      '  const addressText = pickAddress(row);',
+      '  const bname = String(buildingName || row?.building_name || "").trim();',
+      '',
+      '  labelEl.innerHTML = "";',
+      '',
+      '  const addrDiv = document.createElement("div");',
+      '  addrDiv.textContent =',
+      '    bname && bname !== "__NONE__"',
+      '      ? `${addressText} (${bname})`',
+      '      : addressText;',
+      '  addrDiv.style.cssText = "font-weight:800;";',
+      '  labelEl.appendChild(addrDiv);',
+      '};',
+    ].join("\n");
+
+    const addressLabelReplacement = [
+      'const setAddressLabelContent = (labelEl, row, buildingName = "", meterRows = []) => {',
+      '  if (!labelEl) return;',
+      '',
+      '  labelEl.innerHTML = "";',
+      '',
+      '  if (addressLabelMode === "meter") {',
+      '    const typeCounts = { A: 0, G: 0, E: 0, O: 0 };',
+      '    const shortCodeByType = {',
+      '      "Adv-E": "A",',
+      '      "G-Type": "G",',
+      '      "E-Type": "E",',
+      '      AMIGO: "O",',
+      '    };',
+      '',
+      '    for (const meterRow of meterRows || []) {',
+      '      const shortCode = shortCodeByType[getMeterType(meterRow?.meter_id)];',
+      '      if (shortCode) typeCounts[shortCode] += 1;',
+      '    }',
+      '',
+      '    const typeSummary = ["A", "G", "E", "O"]',
+      '      .filter((code) => typeCounts[code] > 0)',
+      '      .map((code) => `${code}[${typeCounts[code]}]`)',
+      '      .join(" ");',
+      '',
+      '    const meterDiv = document.createElement("div");',
+      '    meterDiv.textContent = typeSummary || "-";',
+      '    meterDiv.style.cssText = "font-weight:900; text-align:center;";',
+      '    labelEl.appendChild(meterDiv);',
+      '    return;',
+      '  }',
+      '',
+      '  const addressText = pickAddress(row);',
+      '  const bname = String(buildingName || row?.building_name || "").trim();',
+      '',
+      '  const addrDiv = document.createElement("div");',
+      '  addrDiv.textContent =',
+      '    bname && bname !== "__NONE__"',
+      '      ? `${addressText} (${bname})`',
+      '      : addressText;',
+      '  addrDiv.style.cssText = "font-weight:800;";',
+      '  labelEl.appendChild(addrDiv);',
+      '};',
+    ].join("\n");
+
+    code = replaceRequired(
+      code,
+      addressLabelTarget,
+      addressLabelReplacement,
+      "계기 모드 라벨 내용"
     );
 
     code = replaceRequired(
       code,
       "        setAddressLabelContent(labelEl, list[0], cachedB);",
       "        setAddressLabelContent(labelEl, list[0], cachedB, list);",
-      "초기 주소 라벨 계기 목록 전달"
+      "초기 라벨 계기 목록 전달"
     );
     code = replaceRequired(
       code,
       "                  setAddressLabelContent(lbl.el, list[0], bn);",
       "                  setAddressLabelContent(lbl.el, list[0], bn, list);",
-      "건물명 갱신 주소 라벨 계기 목록 전달"
+      "건물명 갱신 라벨 계기 목록 전달"
     );
 
-    // 5) 팝업의 인입주 전산화 / 인입주 값을 클릭하면 클립보드 복사
+    // 6) 팝업의 인입주 전산화 / 인입주 값을 클릭하면 클립보드 복사
     const inipjuTarget = [
       '              const digitalLine = document.createElement("div");',
       '              digitalLine.textContent = `인입주 전산화 : ${digitalText || "-"}`;',
