@@ -8,5 +8,108 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
+    <script>
+      (() => {
+        const getAddressTitle = (node) => {
+          const title = node?.closest?.("b");
+          if (!title) return null;
+
+          const popup = title.parentElement;
+          if (!popup) return null;
+
+          const directTitle = Array.from(popup.children).find(
+            (el) => el.tagName === "B"
+          );
+          if (directTitle !== title) return null;
+
+          const buttonTexts = Array.from(popup.children)
+            .filter((el) => el.tagName === "BUTTON")
+            .map((el) => String(el.textContent || "").trim());
+
+          const isMarkerPopup =
+            buttonTexts.includes("가기") &&
+            buttonTexts.includes("불가") &&
+            buttonTexts.includes("미방문") &&
+            (buttonTexts.includes("완료") || buttonTexts.includes("교체"));
+
+          return isMarkerPopup ? title : null;
+        };
+
+        const fallbackCopy = (text) => {
+          const textarea = document.createElement("textarea");
+          textarea.value = text;
+          textarea.style.position = "fixed";
+          textarea.style.top = "-9999px";
+          textarea.setAttribute("readonly", "");
+          document.body.appendChild(textarea);
+          textarea.focus();
+          textarea.select();
+
+          let copied = false;
+          try {
+            copied = document.execCommand("copy");
+          } catch (_) {
+            copied = false;
+          }
+
+          document.body.removeChild(textarea);
+          return copied;
+        };
+
+        const copyAddress = async (address) => {
+          if (navigator.clipboard?.writeText) {
+            try {
+              await navigator.clipboard.writeText(address);
+              return true;
+            } catch (_) {
+              // HTTPS/권한 문제 시 구형 복사 방식으로 재시도
+            }
+          }
+          return fallbackCopy(address);
+        };
+
+        document.addEventListener(
+          "pointerover",
+          (event) => {
+            const title = getAddressTitle(event.target);
+            if (!title) return;
+            title.style.cursor = "copy";
+            title.title = "클릭 시 주소 복사";
+          },
+          true
+        );
+
+        document.addEventListener(
+          "click",
+          async (event) => {
+            const title = getAddressTitle(event.target);
+            if (!title) return;
+
+            const address = String(title.textContent || "").trim();
+            if (!address || address === "-") return;
+
+            event.preventDefault();
+            event.stopPropagation();
+
+            const copied = await copyAddress(address);
+            if (!copied) {
+              alert("주소 복사에 실패했습니다. 다시 시도해주세요.");
+              return;
+            }
+
+            const prevBackground = title.style.backgroundColor;
+            const prevTransition = title.style.transition;
+            title.style.transition = "background-color 0.15s ease";
+            title.style.backgroundColor = "#fff3bf";
+
+            window.setTimeout(() => {
+              title.style.backgroundColor = prevBackground;
+              title.style.transition = prevTransition;
+            }, 700);
+          },
+          true
+        );
+      })();
+    </script>
   </body>
 </html>
