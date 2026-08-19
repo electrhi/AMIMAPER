@@ -1,4 +1,5 @@
 const PHONE_BUTTON_SELECTOR = '[data-amimap-phone-button="1"]';
+const BUILDING_LINE_MARKER = "data-amimap-phone-building-line";
 
 const normalizeText = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
 
@@ -12,24 +13,26 @@ const findBuildingLine = (popup) =>
 const movePhoneButtonToBuildingLine = (phoneButton) => {
   if (!(phoneButton instanceof HTMLElement)) return;
 
-  const popup = phoneButton.closest("div");
-  if (!popup) return;
-
-  // 전화 버튼이 이미 건물명 줄 안에 있으면 더 이상 이동하지 않습니다.
-  if (
-    phoneButton.parentElement?.tagName === "DIV" &&
-    normalizeText(phoneButton.parentElement.textContent).includes("🏢")
-  ) {
+  // 이미 실제 건물명 줄로 이동한 버튼은 그대로 둡니다.
+  // 기존 코드는 팝업 전체 DIV의 textContent에 🏢가 포함되어 있다는 이유로
+  // 이동 전에도 "이미 이동됨"으로 잘못 판단할 수 있었습니다.
+  if (phoneButton.parentElement?.getAttribute?.(BUILDING_LINE_MARKER) === "1") {
     return;
   }
 
+  const popup = phoneButton.closest("div");
+  if (!popup) return;
+
   const buildingLine = findBuildingLine(popup);
   if (!buildingLine) return;
+
+  buildingLine.setAttribute(BUILDING_LINE_MARKER, "1");
 
   phoneButton.style.margin = "0 6px 0 0";
   phoneButton.style.padding = "2px 7px";
   phoneButton.style.verticalAlign = "middle";
   phoneButton.style.cursor = "pointer";
+  phoneButton.style.flexShrink = "0";
 
   buildingLine.insertBefore(phoneButton, buildingLine.firstChild);
 };
