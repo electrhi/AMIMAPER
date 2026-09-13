@@ -33,12 +33,12 @@ export const amimapMarkerClusterPlugin = () => ({
 
     code = replaceRequired(
       code,
-      "    overlayByKeyRef.current.clear();\n    markerGroupCacheRef.current.clear();",
+      "    meterToKeyRef.current.clear();\n    markerGroupCacheRef.current.clear();",
       [
         "    try { clustererRef.current?.clear?.(); } catch {}",
         "    clustererRef.current = null;",
         "    clusterModeRef.current = false;",
-        "    overlayByKeyRef.current.clear();",
+        "    meterToKeyRef.current.clear();",
         "    markerGroupCacheRef.current.clear();",
       ].join("\n"),
       "cluster logout cleanup"
