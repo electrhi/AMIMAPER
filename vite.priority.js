@@ -161,6 +161,47 @@ export const amimapPriorityPlugin = () => ({
       "priority address dot"
     );
 
+    // 마커 클릭 팝업의 주소 맨 앞에도 지도 주소 라벨과 같은 우선순위 원을 표시합니다.
+    const popupAddressTarget = [
+      '            const title = document.createElement("b");',
+      '            title.textContent = pickAddress(list[0]);',
+      '',
+      '            popupEl.appendChild(title);',
+    ].join("\n");
+
+    const popupAddressReplacement = [
+      '            const title = document.createElement("b");',
+      '            title.style.cssText = "display:flex;align-items:center;gap:5px;";',
+      '',
+      '            const popupPriority = getHighestPriority(list);',
+      '            const popupPriorityDot = document.createElement("span");',
+      '            popupPriorityDot.setAttribute("aria-label", getPriorityText(popupPriority));',
+      '            popupPriorityDot.title = getPriorityText(popupPriority);',
+      '            popupPriorityDot.style.cssText = `display:inline-block;flex:0 0 auto;width:9px;height:9px;border-radius:50%;background:${getPriorityColor(popupPriority)};box-shadow:0 0 0 1px rgba(0,0,0,0.18);`;',
+      '',
+      '            const popupAddressSpan = document.createElement("span");',
+      '            popupAddressSpan.textContent = pickAddress(list[0]);',
+      '',
+      '            title.appendChild(popupPriorityDot);',
+      '            title.appendChild(popupAddressSpan);',
+      '            popupEl.appendChild(title);',
+    ].join("\n");
+
+    code = replaceRequired(
+      code,
+      popupAddressTarget,
+      popupAddressReplacement,
+      "priority popup address dot"
+    );
+
+    // 미좌표 목록의 첫 정보는 리스트번호 대신 Excel의 인입주전산화 값을 표시합니다.
+    code = replaceRequired(
+      code,
+      '{String(r?.list_no ?? "-")} | {String(r?.meter_id ?? "-")} | {pickAddress(r) || "-"}',
+      '{String(r?.inipju_digital ?? "-")} | {String(r?.meter_id ?? "-")} | {pickAddress(r) || "-"}',
+      "no coordinate inipju digital"
+    );
+
     // 필터 패널에 우선순위 다중 필터를 추가합니다.
     const filterAnchor = [
       '          <div style={{ marginTop: 8, fontSize: isMobile ? "13px" : "12px", color: "#555" }}>',
