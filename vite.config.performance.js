@@ -2,6 +2,7 @@ import { defineConfig } from "vite";
 import baseConfig from "./vite.config.js";
 import { amimapExcelPerformancePlugin } from "./vite.performance-excel.js";
 import { amimapCorePerformancePlugin } from "./vite.performance-core.js";
+import { amimapSafeAddressMatchPlugin } from "./vite.safe-address-match.js";
 import { amimapPriorityPlugin } from "./vite.priority.js";
 import { amimapFilteredCountsPlugin } from "./vite.filtered-counts.js";
 import { amimapMarkerClusterPlugin } from "./vite.marker-cluster.js";
@@ -19,6 +20,7 @@ export default defineConfig({
     ...inheritedPlugins,
     amimapExcelPerformancePlugin(),
     amimapCorePerformancePlugin(),
+    amimapSafeAddressMatchPlugin(),
     amimapPriorityPlugin(),
     amimapFilteredCountsPlugin(),
     amimapMarkerClusterPlugin(),
