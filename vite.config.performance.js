@@ -7,6 +7,7 @@ import { amimapFilteredCountsPlugin } from "./vite.filtered-counts.js";
 import { amimapMarkerClusterPlugin } from "./vite.marker-cluster.js";
 import { amimapClusterMeterCountPlugin } from "./vite.cluster-meter-count.js";
 import { amimapRealtimeCollaborationPlugin } from "./vite.realtime-collab.js";
+import { amimapPopupStabilityPlugin } from "./vite.popup-stability.js";
 
 const inheritedPlugins = Array.isArray(baseConfig?.plugins) ? baseConfig.plugins : [];
 
@@ -21,5 +22,6 @@ export default defineConfig({
     amimapMarkerClusterPlugin(),
     amimapClusterMeterCountPlugin(),
     amimapRealtimeCollaborationPlugin(),
+    amimapPopupStabilityPlugin(),
   ],
 });
