@@ -24,7 +24,7 @@ export const amimapMarkerClusterPlugin = () => ({
       code,
       "  const LABEL_SHOW_LEVEL = 5;",
       [
-        "  const CLUSTER_MODE_LEVEL = 5;",
+        "  const CLUSTER_MODE_LEVEL = 6;",
         "  const clustererRef = useRef(null);",
         "  const clusterModeRef = useRef(false);",
       ].join("\n"),
