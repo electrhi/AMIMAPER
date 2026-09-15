@@ -113,6 +113,231 @@ export const amimapMixedInipjuDigitalColorPlugin = () => ({
       "partial marker color"
     );
 
+    // ✅ 왼쪽 상단 상태/검색/필터 패널 접기/펼치기 상태
+    code = insertAfterRequired(
+      code,
+      "const [noCoordModalOpen, setNoCoordModalOpen] = useState(false);",
+      "const [isStatusPanelCollapsed, setIsStatusPanelCollapsed] = useState(false);",
+      "status panel collapsed state"
+    );
+
+    // ✅ 기존 실시간 GPS 위치를 이용한 일반 사용자 '내 위치' 이동 함수
+    code = insertAfterRequired(
+      code,
+      [
+        "  const myLastPosRef = useRef(null);",
+        "  const myLastHeadingRef = useRef(null);",
+      ].join("\n"),
+      [
+        "",
+        "  const moveToMyCurrentLocation = () => {",
+        "    if (!map || isAdmin || !window.kakao?.maps) return;",
+        "",
+        "    const moveTo = (lat, lng) => {",
+        "      const latN = Number(lat);",
+        "      const lngN = Number(lng);",
+        "      if (!Number.isFinite(latN) || !Number.isFinite(lngN)) return;",
+        "",
+        "      const locPosition = new window.kakao.maps.LatLng(latN, lngN);",
+        "      try {",
+        "        if (map.getLevel() > 4) map.setLevel(4);",
+        "        map.panTo(locPosition);",
+        "      } catch (err) {",
+        "        debugWarn(\"[WARN][MY_LOCATION] 지도 이동 실패:\", err?.message);",
+        "      }",
+        "    };",
+        "",
+        "    const cached = myLastPosRef.current;",
+        "    if (cached && Number.isFinite(Number(cached.lat)) && Number.isFinite(Number(cached.lng))) {",
+        "      moveTo(cached.lat, cached.lng);",
+        "      return;",
+        "    }",
+        "",
+        "    if (!navigator.geolocation) {",
+        "      alert(\"현재 위치를 사용할 수 없는 브라우저입니다.\");",
+        "      return;",
+        "    }",
+        "",
+        "    navigator.geolocation.getCurrentPosition(",
+        "      (pos) => {",
+        "        const lat = pos.coords.latitude;",
+        "        const lng = pos.coords.longitude;",
+        "        myLastPosRef.current = { lat, lng };",
+        "        moveTo(lat, lng);",
+        "      },",
+        "      (err) => {",
+        "        debugWarn(\"[WARN][MY_LOCATION] 현재 위치 조회 실패:\", err?.message);",
+        "        alert(\"현재 위치를 확인하지 못했습니다. 위치 권한을 확인해주세요.\");",
+        "      },",
+        "      { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }",
+        "    );",
+        "  };",
+      ].join("\n"),
+      "move to my current location"
+    );
+
+    const statusPanelOpenTarget = [
+      "      {/* 왼쪽 상단 상태 카운트 + 검색/필터 */}",
+      "<div",
+      "  style={{",
+      '    position: "fixed",',
+      "    top: 10,",
+      "    left: 10,",
+      '    background: "white",',
+      '    padding: isMobile ? "10px 12px" : "8px 12px",',
+      '    borderRadius: "10px",',
+      '    boxShadow: "0 2px 8px rgba(0,0,0,0.18)",',
+      "    zIndex: 999999,",
+      '    fontSize: isMobile ? "13px" : "12px",',
+      "    transform: `scale(${isMobile ? 0.665 : 0.546})`,",
+      '    transformOrigin: "top left",',
+      "  }}",
+      ">",
+    ].join("\n");
+
+    const statusPanelOpenReplacement = [
+      "      {/* 왼쪽 상단 상태 카운트 + 검색/필터 */}",
+      "<div",
+      "  style={{",
+      '    position: "fixed",',
+      "    top: 10,",
+      "    left: 10,",
+      "    zIndex: 999999,",
+      '    display: "flex",',
+      '    alignItems: "flex-start",',
+      "    transform: `scale(${isMobile ? 0.665 : 0.546})`,",
+      '    transformOrigin: "top left",',
+      "  }}",
+      ">",
+      "  {!isStatusPanelCollapsed && (",
+      "    <div",
+      "      style={{",
+      '        background: "white",',
+      '        padding: isMobile ? "10px 12px" : "8px 12px",',
+      '        borderRadius: "10px",',
+      '        boxShadow: "0 2px 8px rgba(0,0,0,0.18)",',
+      '        fontSize: isMobile ? "13px" : "12px",',
+      "      }}",
+      "    >",
+    ].join("\n");
+
+    code = replaceRequired(
+      code,
+      statusPanelOpenTarget,
+      statusPanelOpenReplacement,
+      "collapsible status panel opening"
+    );
+
+    const statusPanelCloseTarget = [
+      "    >",
+      "     ⚙️ 필터",
+      "    </button>",
+      "  </div>",
+      "</div>",
+      "",
+      "",
+      "      {/* ➕ 임의 마커 추가 버튼 + 로그아웃 버튼 (오른쪽 상단) */}",
+    ].join("\n");
+
+    const statusPanelCloseReplacement = [
+      "    >",
+      "     ⚙️ 필터",
+      "    </button>",
+      "  </div>",
+      "    </div>",
+      "  )}",
+      "  <button",
+      "    type=\"button\"",
+      "    onClick={() => setIsStatusPanelCollapsed((v) => !v)}",
+      "    aria-label={isStatusPanelCollapsed ? \"상태 패널 펼치기\" : \"상태 패널 접기\"}",
+      "    title={isStatusPanelCollapsed ? \"상태 패널 펼치기\" : \"상태 패널 접기\"}",
+      "    style={{",
+      '      width: "32px",',
+      '      height: "50px",',
+      "      marginLeft: isStatusPanelCollapsed ? 0 : 4,",
+      '      padding: 0,',
+      '      border: "1px solid rgba(0,0,0,0.12)",',
+      '      borderRadius: "8px",',
+      '      background: "rgba(255,255,255,0.96)",',
+      '      color: "#475569",',
+      '      boxShadow: "0 2px 8px rgba(0,0,0,0.14)",',
+      '      cursor: "pointer",',
+      '      fontSize: "16px",',
+      '      fontWeight: 500,',
+      '      lineHeight: 1,',
+      '      display: "flex",',
+      '      alignItems: "center",',
+      '      justifyContent: "center",',
+      "    }}",
+      "  >",
+      "    {isStatusPanelCollapsed ? \"▶\" : \"◀\"}",
+      "  </button>",
+      "</div>",
+      "",
+      "",
+      "      {/* ➕ 임의 마커 추가 버튼 + 로그아웃 버튼 (오른쪽 상단) */}",
+    ].join("\n");
+
+    code = replaceRequired(
+      code,
+      statusPanelCloseTarget,
+      statusPanelCloseReplacement,
+      "collapsible status panel closing"
+    );
+
+    // ✅ 일반 사용자에게만 오른쪽 아래 '내 위치' 버튼 표시
+    const myLocationButtonTarget = [
+      "      {isAdmin && (",
+      "        <button",
+      "          onClick={openAdminPage}",
+    ].join("\n");
+
+    const myLocationButtonReplacement = [
+      "      {!isAdmin && (",
+      "        <button",
+      "          type=\"button\"",
+      "          onClick={moveToMyCurrentLocation}",
+      "          aria-label=\"내 위치로 이동\"",
+      "          title=\"내 위치로 이동\"",
+      "          style={{",
+      '            position: "fixed",',
+      "            bottom: 20,",
+      "            right: 20,",
+      "            zIndex: 999999,",
+      '            width: "44px",',
+      '            height: "44px",',
+      '            padding: 0,',
+      '            borderRadius: "8px",',
+      '            border: "1px solid #d7dce1",',
+      '            background: "rgba(255,255,255,0.98)",',
+      '            color: "#3f4852",',
+      '            cursor: "pointer",',
+      '            boxShadow: "0 2px 7px rgba(0,0,0,0.22)",',
+      '            display: "flex",',
+      '            alignItems: "center",',
+      '            justifyContent: "center",',
+      "          }}",
+      "        >",
+      "          <svg width=\"23\" height=\"23\" viewBox=\"0 0 24 24\" fill=\"none\" aria-hidden=\"true\">",
+      "            <circle cx=\"12\" cy=\"12\" r=\"6.2\" stroke=\"currentColor\" strokeWidth=\"1.8\" />",
+      "            <circle cx=\"12\" cy=\"12\" r=\"2.2\" fill=\"currentColor\" />",
+      "            <path d=\"M12 2.5V5M12 19V21.5M2.5 12H5M19 12H21.5\" stroke=\"currentColor\" strokeWidth=\"1.8\" strokeLinecap=\"round\" />",
+      "          </svg>",
+      "        </button>",
+      "      )}",
+      "",
+      "      {isAdmin && (",
+      "        <button",
+      "          onClick={openAdminPage}",
+    ].join("\n");
+
+    code = replaceRequired(
+      code,
+      myLocationButtonTarget,
+      myLocationButtonReplacement,
+      "non-admin current location button"
+    );
+
     return { code, map: null };
   },
 });
