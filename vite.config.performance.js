@@ -12,6 +12,7 @@ import { amimapPopupStabilityPlugin } from "./vite.popup-stability.js";
 import { amimapMixedInipjuDigitalColorPlugin } from "./vite.mixed-inipju-digital-color.js";
 import { amimapAdminCurrentLocationPlugin } from "./vite.admin-current-location.js";
 import { amimapMapTypeLabelPlugin } from "./vite.map-type-label.js";
+import { amimapTopActionsLayoutPlugin } from "./vite.top-actions-layout.js";
 import { amimapCommLabelModePlugin } from "./vite.comm-label-mode.js";
 
 const inheritedPlugins = Array.isArray(baseConfig?.plugins) ? baseConfig.plugins : [];
@@ -32,6 +33,7 @@ export default defineConfig({
     amimapMixedInipjuDigitalColorPlugin(),
     amimapAdminCurrentLocationPlugin(),
     amimapMapTypeLabelPlugin(),
+    amimapTopActionsLayoutPlugin(),
     amimapCommLabelModePlugin(),
   ],
 });
