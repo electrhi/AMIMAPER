@@ -1,0 +1,58 @@
+name: Temporary Inspect 0913 1S4N
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install
+      - name: Download target files
+        run: |
+          curl -fL 'https://ijuxerhjqmrpjwgsfuqk.supabase.co/storage/v1/object/public/excels/26BG_0913_1S4N.xlsx' -o /tmp/target.xlsx
+          curl -fL 'https://ijuxerhjqmrpjwgsfuqk.supabase.co/storage/v1/object/public/excels/geoCache_26BG_0913_1S4N.xlsx.json' -o /tmp/geocache.json
+          ls -lh /tmp/target.xlsx /tmp/geocache.json
+      - name: Inspect workbook and cache
+        run: |
+          node <<'NODE'
+          const XLSX = require('xlsx');
+          const fs = require('fs');
+          const wb = XLSX.readFile('/tmp/target.xlsx');
+          console.log('SHEET_NAMES', JSON.stringify(wb.SheetNames));
+          let totalRowsAllSheets = 0;
+          for (const name of wb.SheetNames) {
+            const ws = wb.Sheets[name];
+            const rows = XLSX.utils.sheet_to_json(ws, { raw: true, defval: '' });
+            totalRowsAllSheets += rows.length;
+            const headers = rows.length ? Object.keys(rows[0]) : [];
+            const meterRows = rows.filter(r => String(r['계기번호'] ?? '').trim() !== '');
+            const coordRows = rows.filter(r => {
+              const lat = r['lat'] ?? r['위도'];
+              const lng = r['lng'] ?? r['경도'];
+              return String(lat ?? '').trim() !== '' && String(lng ?? '').trim() !== '';
+            });
+            const uniqueMeters = new Set(meterRows.map(r => String(r['계기번호']).replace(/[\s\u00A0\u200B-\u200D\uFEFF]/g, '').trim()));
+            console.log('SHEET', name, 'REF', ws['!ref'], 'ROWS', rows.length, 'METER_ROWS', meterRows.length, 'UNIQUE_METERS', uniqueMeters.size, 'COORD_ROWS', coordRows.length);
+            console.log('HEADERS', name, JSON.stringify(headers));
+            console.log('FIRST_ROW', name, JSON.stringify(rows[0] ?? null));
+            console.log('LAST_ROW', name, JSON.stringify(rows[rows.length - 1] ?? null));
+          }
+          console.log('TOTAL_ROWS_ALL_SHEETS', totalRowsAllSheets);
+          const cacheRaw = fs.readFileSync('/tmp/geocache.json', 'utf8');
+          let cache = JSON.parse(cacheRaw);
+          let unwrap = 0;
+          while (cache && typeof cache === 'object' && !Array.isArray(cache) && Object.keys(cache).length === 1) {
+            const k = Object.keys(cache)[0];
+            const v = cache[k];
+            if (!v || typeof v !== 'object' || Array.isArray(v)) break;
+            cache = v;
+            unwrap++;
+          }
+          console.log('GEOCACHE_UNWRAP', unwrap, 'KEYS', cache && typeof cache === 'object' ? Object.keys(cache).length : -1);
+          NODE
