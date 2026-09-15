@@ -1,5 +1,6 @@
 import { defineConfig } from "vite";
 import baseConfig from "./vite.config.js";
+import { amimapSupabaseSingletonPlugin } from "./vite.supabase-singleton.js";
 import { amimapExcelPerformancePlugin } from "./vite.performance-excel.js";
 import { amimapCorePerformancePlugin } from "./vite.performance-core.js";
 import { amimapSafeAddressMatchPlugin } from "./vite.safe-address-match.js";
@@ -21,6 +22,7 @@ export default defineConfig({
   ...baseConfig,
   plugins: [
     ...inheritedPlugins,
+    amimapSupabaseSingletonPlugin(),
     amimapExcelPerformancePlugin(),
     amimapCorePerformancePlugin(),
     amimapSafeAddressMatchPlugin(),
