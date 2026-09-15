@@ -48,9 +48,16 @@ export const amimapMixedInipjuDigitalColorPlugin = () => ({
       [
         "        // ✅ 이 좌표 그룹에 농사/농사용이 하나라도 있으면 true",
         "        const hasFarming = list.some((r) => isFarmingContract(r?.contract_type));",
-        "        // ✅ 동일 좌표 그룹의 인입주전산화가 서로 다르면 상태색보다 파란색을 우선",
+        "        // ✅ 동일 좌표 그룹의 인입주전산화가 서로 다르면 파란색 강조",
+        "        //    단, 완료/불가는 작업 상태색(초록/빨강)을 최우선으로 표시",
         "        const hasMixedInipjuDigital = hasMixedInipjuDigitalValues(list);",
-        "        const color = hasMixedInipjuDigital ? \"blue\" : getMarkerColor(진행, hasFarming);",
+        "        const normalizedMarkerStatus = normalizeStatusValue(진행);",
+        "        const color =",
+        "          normalizedMarkerStatus === \"완료\" || normalizedMarkerStatus === \"불가\"",
+        "            ? getMarkerColor(normalizedMarkerStatus, hasFarming)",
+        "            : hasMixedInipjuDigital",
+        "              ? \"blue\"",
+        "              : getMarkerColor(normalizedMarkerStatus, hasFarming);",
       ].join("\n"),
       "initial marker color"
     );
@@ -74,7 +81,13 @@ export const amimapMixedInipjuDigitalColorPlugin = () => ({
       [
         "    const hasFarming = !!overlay.__hasFarming; // ✅ 마커 생성 시 저장한 값 사용",
         "    const hasMixedInipjuDigital = !!overlay.__hasMixedInipjuDigital;",
-        "    el.style.background = hasMixedInipjuDigital ? \"blue\" : getMarkerColor(status, hasFarming);",
+        "    const normalizedMarkerStatus = normalizeStatusValue(status);",
+        "    el.style.background =",
+        "      normalizedMarkerStatus === \"완료\" || normalizedMarkerStatus === \"불가\"",
+        "        ? getMarkerColor(normalizedMarkerStatus, hasFarming)",
+        "        : hasMixedInipjuDigital",
+        "          ? \"blue\"",
+        "          : getMarkerColor(normalizedMarkerStatus, hasFarming);",
       ].join("\n"),
       "status refresh marker color"
     );
@@ -89,7 +102,13 @@ export const amimapMixedInipjuDigitalColorPlugin = () => ({
       [
         "      const hasFarming = !!overlay.__hasFarming;",
         "      const hasMixedInipjuDigital = !!overlay.__hasMixedInipjuDigital;",
-        "      const color = hasMixedInipjuDigital ? \"blue\" : getMarkerColor(newStatus, hasFarming);",
+        "      const normalizedMarkerStatus = normalizeStatusValue(newStatus);",
+        "      const color =",
+        "        normalizedMarkerStatus === \"완료\" || normalizedMarkerStatus === \"불가\"",
+        "          ? getMarkerColor(normalizedMarkerStatus, hasFarming)",
+        "          : hasMixedInipjuDigital",
+        "            ? \"blue\"",
+        "            : getMarkerColor(normalizedMarkerStatus, hasFarming);",
       ].join("\n"),
       "partial marker color"
     );
