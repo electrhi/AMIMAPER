@@ -1,11 +1,11 @@
-name: Temporary Inspect 0913 1S4N
+name: Temporary AMIMAPER Verification
 
 on:
   push:
     branches: [main]
 
 jobs:
-  inspect:
+  verify:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -13,65 +13,9 @@ jobs:
         with:
           node-version: 20
       - run: npm install
-      - name: Download target files
+      - run: npm run build
+      - name: Verify Supabase singleton wiring
         run: |
-          curl -fL 'https://ijuxerhjqmrpjwgsfuqk.supabase.co/storage/v1/object/public/excels/26BG_0913_1S4N.xlsx' -o /tmp/target.xlsx
-          curl -fL 'https://ijuxerhjqmrpjwgsfuqk.supabase.co/storage/v1/object/public/excels/geoCache_26BG_0913_1S4N.xlsx.json' -o /tmp/geocache.json
-      - name: Inspect workbook and cache
-        run: |
-          node <<'NODE'
-          const XLSX = require('xlsx');
-          const fs = require('fs');
-          const wb = XLSX.readFile('/tmp/target.xlsx');
-          const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { raw: true, defval: '' });
-          const normalizeMeterId = id => String(id ?? '').replace(/[\s\u00A0\u200B-\u200D\uFEFF]/g, '').trim();
-          const normalizeAddr = str => str?.toString().trim().replace(/\s+/g, ' ').replace(/\u3000/g, ' ').replace(/\r|\n|\t/g, '').replace(/번지/g, '').replace(/ /g, '');
-          let cache = JSON.parse(fs.readFileSync('/tmp/geocache.json', 'utf8'));
-          const normalizedCacheEntries = Object.entries(cache || {}).map(([k,v]) => [normalizeAddr(k), v, k]);
-          const resolveCoord = row => {
-            const addr = normalizeAddr(row['주소']);
-            let match = normalizedCacheEntries.find(([key]) => key === addr);
-            if (!match) match = normalizedCacheEntries.find(([key]) => key.includes(addr) || addr.includes(key));
-            if (!match) return null;
-            const lat = parseFloat(match[1]?.lat), lng = parseFloat(match[1]?.lng);
-            return Number.isFinite(lat) && Number.isFinite(lng) ? `${lat},${lng}` : null;
-          };
-
-          const byMeter = new Map();
-          for (const row of rows) {
-            const meter = normalizeMeterId(row['계기번호']);
-            if (!byMeter.has(meter)) byMeter.set(meter, []);
-            byMeter.get(meter).push(row);
-          }
-          const duplicateGroups = [...byMeter.entries()].filter(([,items]) => items.length > 1);
-          let duplicateRows = 0, multiAddressGroups = 0, multiListGroups = 0, multiCoordGroups = 0, exactDuplicateGroups = 0;
-          const samples = [];
-          for (const [meter, items] of duplicateGroups) {
-            duplicateRows += items.length - 1;
-            const addresses = new Set(items.map(r => String(r['주소'] ?? '').trim()));
-            const lists = new Set(items.map(r => String(r['리스트번호'] ?? '').trim()));
-            const coords = new Set(items.map(resolveCoord).filter(Boolean));
-            if (addresses.size > 1) multiAddressGroups++;
-            if (lists.size > 1) multiListGroups++;
-            if (coords.size > 1) multiCoordGroups++;
-            const sigs = new Set(items.map(r => JSON.stringify(r)));
-            if (sigs.size === 1) exactDuplicateGroups++;
-            if (samples.length < 15 && (addresses.size > 1 || lists.size > 1 || coords.size > 1)) {
-              samples.push({meter, count: items.length, addresses:[...addresses], lists:[...lists], coords:[...coords]});
-            }
-          }
-          console.log('ROWS', rows.length, 'UNIQUE_METERS', byMeter.size, 'DUPLICATE_METER_GROUPS', duplicateGroups.length, 'ROWS_REMOVED_BY_METER_DEDUP', duplicateRows);
-          console.log('DUPLICATE_VARIATION', JSON.stringify({multiAddressGroups,multiListGroups,multiCoordGroups,exactDuplicateGroups}));
-          console.log('DUPLICATE_SAMPLES', JSON.stringify(samples));
-
-          const resolved = rows.map(r => ({...r, __coord: resolveCoord(r)}));
-          const latestPerMeter = {};
-          resolved.forEach(d => { const m=normalizeMeterId(d['계기번호']); if (!latestPerMeter[m]) latestPerMeter[m]=d; });
-          const dedupRows = Object.values(latestPerMeter);
-          const visibleGroupsAfterCurrentCode = new Set(dedupRows.filter(r=>r.__coord).map(r=>r.__coord));
-          const visibleRowsAfterCurrentCode = dedupRows.filter(r=>r.__coord).length;
-          console.log('CURRENT_CODE_AFTER_DEDUP_ROWS', visibleRowsAfterCurrentCode, 'CURRENT_CODE_COORD_GROUPS', visibleGroupsAfterCurrentCode.size);
-
-          const addressMeterUnique = new Set(resolved.map(r => `${normalizeAddr(r['주소'])}_${normalizeMeterId(r['계기번호'])}`));
-          console.log('UNIQUE_ADDRESS_METER_PAIRS', addressMeterUnique.size);
-          NODE
+          test -f src/supabase-client.js
+          test -f vite.supabase-singleton.js
+          grep -q 'amimapSupabaseSingletonPlugin()' vite.config.performance.js
