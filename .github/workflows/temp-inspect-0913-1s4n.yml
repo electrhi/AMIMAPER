@@ -25,25 +25,13 @@ jobs:
           const fs = require('fs');
           const wb = XLSX.readFile('/tmp/target.xlsx');
           console.log('SHEET_NAMES', JSON.stringify(wb.SheetNames));
-          let totalRowsAllSheets = 0;
-          for (const name of wb.SheetNames) {
-            const ws = wb.Sheets[name];
-            const rows = XLSX.utils.sheet_to_json(ws, { raw: true, defval: '' });
-            totalRowsAllSheets += rows.length;
-            const headers = rows.length ? Object.keys(rows[0]) : [];
-            const meterRows = rows.filter(r => String(r['계기번호'] ?? '').trim() !== '');
-            const coordRows = rows.filter(r => {
-              const lat = r['lat'] ?? r['위도'];
-              const lng = r['lng'] ?? r['경도'];
-              return String(lat ?? '').trim() !== '' && String(lng ?? '').trim() !== '';
-            });
-            const uniqueMeters = new Set(meterRows.map(r => String(r['계기번호']).replace(/[\s\u00A0\u200B-\u200D\uFEFF]/g, '').trim()));
-            console.log('SHEET', name, 'REF', ws['!ref'], 'ROWS', rows.length, 'METER_ROWS', meterRows.length, 'UNIQUE_METERS', uniqueMeters.size, 'COORD_ROWS', coordRows.length);
-            console.log('HEADERS', name, JSON.stringify(headers));
-            console.log('FIRST_ROW', name, JSON.stringify(rows[0] ?? null));
-            console.log('LAST_ROW', name, JSON.stringify(rows[rows.length - 1] ?? null));
-          }
-          console.log('TOTAL_ROWS_ALL_SHEETS', totalRowsAllSheets);
+          const first = wb.Sheets[wb.SheetNames[0]];
+          const rows = XLSX.utils.sheet_to_json(first, { raw: true, defval: '' });
+          const headers = rows.length ? Object.keys(rows[0]) : [];
+          const normalizeMeterId = id => String(id ?? '').replace(/[\s\u00A0\u200B-\u200D\uFEFF]/g, '').trim();
+          console.log('SHEET', wb.SheetNames[0], 'REF', first['!ref'], 'ROWS', rows.length, 'METER_ROWS', rows.filter(r => String(r['계기번호'] ?? '').trim() !== '').length, 'UNIQUE_METERS', new Set(rows.map(r => normalizeMeterId(r['계기번호'])).filter(Boolean)).size);
+          console.log('HEADERS', JSON.stringify(headers));
+
           const cacheRaw = fs.readFileSync('/tmp/geocache.json', 'utf8');
           let cache = JSON.parse(cacheRaw);
           let unwrap = 0;
@@ -55,4 +43,56 @@ jobs:
             unwrap++;
           }
           console.log('GEOCACHE_UNWRAP', unwrap, 'KEYS', cache && typeof cache === 'object' ? Object.keys(cache).length : -1);
+
+          const normalizeAddr = str => str?.toString().trim().replace(/\s+/g, ' ').replace(/\u3000/g, ' ').replace(/\r|\n|\t/g, '').replace(/번지/g, '').replace(/ /g, '');
+          const normalizedCacheEntries = Object.entries(cache || {}).map(([k,v]) => [normalizeAddr(k), v, k]);
+          let exactCount = 0, partialCount = 0, similarCount = 0, unmatchedCount = 0, validCoordCount = 0;
+          const unmatchedSamples = [];
+          const matchedMeters = new Set();
+          const renderedMeters = new Set();
+          const coordGroups = new Set();
+          for (const row of rows) {
+            const addr = normalizeAddr(row['주소']);
+            let match = null;
+            let mode = null;
+            if (addr) {
+              match = normalizedCacheEntries.find(([key]) => key === addr);
+              if (match) mode = 'exact';
+              if (!match) {
+                match = normalizedCacheEntries.find(([key]) => key.includes(addr) || addr.includes(key));
+                if (match) mode = 'partial';
+              }
+              if (!match) {
+                const parts = addr.split(' ');
+                const dongName = parts[2] || parts[1] || parts[0];
+                match = normalizedCacheEntries.find(([key]) => key.includes(dongName) && key.slice(-5) === addr.slice(-5));
+                if (match) mode = 'similar';
+              }
+            }
+            if (mode === 'exact') exactCount++;
+            else if (mode === 'partial') partialCount++;
+            else if (mode === 'similar') similarCount++;
+            else {
+              unmatchedCount++;
+              if (unmatchedSamples.length < 20) unmatchedSamples.push(row['주소']);
+            }
+            const meter = normalizeMeterId(row['계기번호']);
+            if (match) {
+              matchedMeters.add(meter);
+              const lat = parseFloat(match[1]?.lat);
+              const lng = parseFloat(match[1]?.lng);
+              if (Number.isFinite(lat) && Number.isFinite(lng)) {
+                validCoordCount++;
+                renderedMeters.add(meter);
+                coordGroups.add(`${lat},${lng}`);
+              }
+            }
+          }
+          console.log('MATCH_COUNTS', JSON.stringify({exactCount,partialCount,similarCount,unmatchedCount,validCoordCount}));
+          console.log('MATCHED_UNIQUE_METERS', matchedMeters.size, 'RENDERABLE_UNIQUE_METERS', renderedMeters.size, 'COORD_GROUPS', coordGroups.size);
+          console.log('UNMATCHED_SAMPLES', JSON.stringify(unmatchedSamples));
+
+          const uniqueAddresses = new Set(rows.map(r => normalizeAddr(r['주소'])).filter(Boolean));
+          const cacheValidCoords = Object.values(cache || {}).filter(v => Number.isFinite(parseFloat(v?.lat)) && Number.isFinite(parseFloat(v?.lng))).length;
+          console.log('UNIQUE_EXCEL_ADDRESSES', uniqueAddresses.size, 'CACHE_VALID_COORD_KEYS', cacheValidCoords);
           NODE
