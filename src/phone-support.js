@@ -362,6 +362,11 @@ const resolvePhoneForPopup = async (popup, button) => {
 
 const injectPhoneButton = (popup) => {
   if (!isMarkerPopup(popup)) return;
+  // 개인정보 모드 ON에서는 ☎ 버튼을 만들지 않으며, 이미 있으면 제거합니다.
+  if (popup.dataset.amimapInfo === "ON") {
+    popup.querySelectorAll(`[${PHONE_BUTTON_ATTR}="1"]`).forEach((button) => button.remove());
+    return;
+  }
   if (popup.querySelector(`[${PHONE_BUTTON_ATTR}="1"]`)) return;
 
   const goButton = getDirectGoButton(popup);
