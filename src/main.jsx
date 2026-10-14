@@ -41,6 +41,15 @@ const normalizeMeterId = (id) =>
     .replace(/[\s\u00A0\u200B-\u200D\uFEFF]/g, "")
     .trim();
 
+// ✅ 지도 팝업 개인정보 표시용. 원본 계기번호는 상태 갱신 등 내부 처리에만 사용합니다.
+const maskPopupMeterId = (meterId) => {
+  const id = normalizeMeterId(meterId);
+  if (!id) return "";
+  if (id.length < 3) return "*".repeat(id.length);
+  const start = Math.floor((id.length - 3) / 2);
+  return id.slice(0, start) + "***" + id.slice(start + 3);
+};
+
 // ✅ 상태 옵션(필터용)
 const STATUS_OPTIONS = ["완료", "불가", "미방문"];
 
@@ -3243,11 +3252,24 @@ const runSearch = () => {
           // ✅ 어떤 마커를 클릭하든 "현재 화면 내 전체"를 최신화
           await fetchLatestStatus();
 
+          // ✅ 계정별 개인정보 모드: 마커를 열 때 DB 최신 설정을 조회합니다.
+          // 조회 실패 시에는 개인정보 표시를 제한하는 쪽으로 동작합니다.
+          const { data: popupPrivacyRow, error: popupPrivacyError } = await supabase
+            .from("users")
+            .select("info")
+            .eq("id", currentUser?.id || "")
+            .maybeSingle();
+          const popupPrivacyOn =
+            !!popupPrivacyError ||
+            !popupPrivacyRow ||
+            String(popupPrivacyRow.info || "OFF").trim().toUpperCase() === "ON";
 
           const old = getActiveOverlay();
           if (old) old.setMap(null);
 
           const popupEl = document.createElement("div");
+          // phone-support.js에서도 동일한 ON/OFF 설정을 사용합니다.
+          popupEl.dataset.amimapInfo = popupPrivacyOn ? "ON" : "OFF";
           popupEl.style.cssText = `
             position: relative;
             background:white;
@@ -3401,13 +3423,16 @@ const runSearch = () => {
 
               const div = document.createElement("div");
               // ✅ 원하는 출력 형식: 리스트번호 | 통신방식 | 계기번호 | 계기타입
-              div.textContent = `${listNo} | ${commType} | ${id} | ${type}`;
+              const displayMeterId = popupPrivacyOn ? maskPopupMeterId(id) : id;
+              div.textContent = `${listNo} | ${commType} | ${displayMeterId} | ${type}`;
 
               // 기본 스타일
               div.style.padding = "2px 0";
               div.style.cursor = "pointer";
               div.style.userSelect = "none";
-              div.title = "클릭 시 계기번호 복사";
+              div.title = popupPrivacyOn
+                ? "클릭 시 마스킹된 계기번호 복사"
+                : "클릭 시 계기번호 복사";
               div.dataset.selected = "0";
 
               const applySelectedStyle = (on) => {
@@ -3433,7 +3458,7 @@ const runSearch = () => {
                 applySelectedStyle(nextOn);
 
                 // ✅ 2) 복사
-                const meterIdToCopy = id;
+                const meterIdToCopy = displayMeterId;
 
                 if (navigator.clipboard && navigator.clipboard.writeText) {
                   navigator.clipboard.writeText(meterIdToCopy).catch((err) => {
