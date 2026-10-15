@@ -50,6 +50,69 @@ const maskPopupMeterId = (meterId) => {
   return id.slice(0, start) + "***" + id.slice(start + 3);
 };
 
+// ✅ 마커 팝업 목록: 최대 10개 행을 표시하고, 나머지는 세로 스크롤로 조회합니다.
+// 휴대폰에서 기본 스크롤바가 사라지는 경우에도 위치를 알 수 있도록 전용 스크롤 표시기를 둡니다.
+const createPopupScrollableRows = () => {
+  const wrapper = document.createElement("div");
+  wrapper.style.cssText = "display:flex;align-items:stretch;gap:5px;width:100%;min-width:0;margin:3px 0;";
+
+  const rows = document.createElement("div");
+  rows.className = "amimap-popup-scroll-rows";
+  rows.style.cssText = "flex:1;min-width:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;scrollbar-width:none;touch-action:pan-y;";
+  rows.setAttribute("aria-label", "마커 목록 (위아래로 스크롤)");
+  rows.addEventListener("wheel", (event) => event.stopPropagation(), { passive: true });
+  rows.addEventListener("touchmove", (event) => event.stopPropagation(), { passive: true });
+
+  const rail = document.createElement("div");
+  rail.style.cssText = "position:relative;width:7px;flex:0 0 7px;border-radius:6px;background:#e2e8f0;visibility:hidden;";
+  rail.setAttribute("aria-hidden", "true");
+
+  const thumb = document.createElement("div");
+  thumb.style.cssText = "position:absolute;left:0;right:0;top:0;border-radius:6px;background:#64748b;min-height:18px;";
+  rail.appendChild(thumb);
+  wrapper.appendChild(rows);
+  wrapper.appendChild(rail);
+
+  const syncScrollbar = () => {
+    const scrollRange = rows.scrollHeight - rows.clientHeight;
+    if (scrollRange <= 1) {
+      rail.style.visibility = "hidden";
+      return;
+    }
+
+    rail.style.visibility = "visible";
+    const railHeight = rail.clientHeight;
+    const thumbHeight = Math.min(railHeight, Math.max(18, (rows.clientHeight / rows.scrollHeight) * railHeight));
+    const thumbTravel = Math.max(0, railHeight - thumbHeight);
+    thumb.style.height = `${thumbHeight}px`;
+    thumb.style.transform = `translateY(${(rows.scrollTop / scrollRange) * thumbTravel}px)`;
+  };
+
+  const refresh = () => {
+    // 실제 각 행 높이를 측정하므로 줄바꿈되는 계기 정보도 잘리지 않습니다.
+    const rowHeights = Array.from(rows.children)
+      .slice(0, 10)
+      .reduce((height, node) => height + node.getBoundingClientRect().height, 0);
+    // 작은 휴대폰 화면에서는 10행보다 더 적게 표시할 수 있습니다.
+    const available = Math.max(80, Math.floor(window.innerHeight * 0.72 - 210));
+    rows.style.maxHeight = `${Math.max(1, Math.min(Math.ceil(rowHeights), available))}px`;
+    syncScrollbar();
+  };
+
+  rows.addEventListener("scroll", syncScrollbar, { passive: true });
+  // 표시기를 눌러도 목록의 원하는 지점으로 이동할 수 있습니다.
+  rail.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const bounds = rail.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (event.clientY - bounds.top) / Math.max(1, bounds.height)));
+    rows.scrollTop = ratio * Math.max(0, rows.scrollHeight - rows.clientHeight);
+    syncScrollbar();
+  });
+
+  return { wrapper, rows, refresh };
+};
+
 // ✅ 상태 옵션(필터용)
 const STATUS_OPTIONS = ["완료", "불가", "미방문"];
 
@@ -3279,7 +3342,12 @@ const runSearch = () => {
             width:230px;
             box-shadow:0 2px 8px rgba(0,0,0,0.2);
             font-size:12px;
+            max-height:72dvh;
+            overflow-y:auto;
+            overscroll-behavior:contain;
           `;
+
+          const popupScrollLists = [];
 
           // ✕ 닫기 버튼
           const closeBtn = document.createElement("button");
@@ -3313,6 +3381,12 @@ const runSearch = () => {
               )
             );
 
+            const listNoScroll = uniqueListNos.length > 0 ? createPopupScrollableRows() : null;
+            if (listNoScroll) {
+              popupEl.appendChild(listNoScroll.wrapper);
+              popupScrollLists.push(listNoScroll);
+            }
+
             if (uniqueListNos.length === 0) {
               const emptyDiv = document.createElement("div");
               emptyDiv.textContent = "-";
@@ -3322,8 +3396,9 @@ const runSearch = () => {
               uniqueListNos.forEach((listNo) => {
                 const div = document.createElement("div");
                 div.textContent = listNo;
+                div.dataset.amimapListnoRow = "1";
                 div.style.cssText = "padding:4px 0; font-weight:700;";
-                popupEl.appendChild(div);
+                listNoScroll.rows.appendChild(div);
               });
             }
           } else {
@@ -3410,6 +3485,9 @@ const runSearch = () => {
 
             // 중복 제거한 계기번호 목록
             const uniqueMeters = Array.from(new Set(allIds));
+            const meterScroll = createPopupScrollableRows();
+            popupEl.appendChild(meterScroll.wrapper);
+            popupScrollLists.push(meterScroll);
 
             uniqueMeters.forEach((id) => {
               // 이 계기번호에 해당하는 행 하나 찾아서 통신방식/리스트번호 가져오기
@@ -3422,6 +3500,7 @@ const runSearch = () => {
               const commType = row.comm_type || "";
 
               const div = document.createElement("div");
+              div.dataset.amimapMeterRow = "1";
               // ✅ 원하는 출력 형식: 리스트번호 | 통신방식 | 계기번호 | 계기타입
               const displayMeterId = popupPrivacyOn ? maskPopupMeterId(id) : id;
               div.textContent = `${listNo} | ${commType} | ${displayMeterId} | ${type}`;
@@ -3482,7 +3561,7 @@ const runSearch = () => {
                 }
               });
 
-              popupEl.appendChild(div);
+              meterScroll.rows.appendChild(div);
             });
           }
 
@@ -3532,6 +3611,7 @@ const runSearch = () => {
           });
           popupOverlay.setMap(map);
           setActiveOverlay(popupOverlay);
+          requestAnimationFrame(() => popupScrollLists.forEach(({ refresh }) => refresh()));
         };
 
         markerEl.addEventListener("pointerdown", openPopup);
