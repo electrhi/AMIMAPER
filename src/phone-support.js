@@ -236,7 +236,10 @@ const getDirectGoButton = (popup) =>
 const getPopupMeterIds = (popup) => {
   const ids = [];
 
-  Array.from(popup.children).forEach((el) => {
+  // 계기 목록이 스크롤 컨테이너 안에 있어도 기존 고객연락처 매칭 유지
+  const meterNodes = popup.querySelectorAll('[data-amimap-meter-row="1"]');
+  const targets = meterNodes.length ? Array.from(meterNodes) : Array.from(popup.children);
+  targets.forEach((el) => {
     if (el.tagName !== "DIV") return;
     const text = normalizeText(el.textContent);
     if (!text || !text.includes("|")) return;
@@ -254,7 +257,9 @@ const getPopupMeterIds = (popup) => {
 const getPopupListNos = (popup) => {
   const listNos = [];
 
-  Array.from(popup.children).forEach((el) => {
+  const listNoNodes = popup.querySelectorAll('[data-amimap-listno-row="1"]');
+  const targets = listNoNodes.length ? Array.from(listNoNodes) : Array.from(popup.children);
+  targets.forEach((el) => {
     if (el.tagName !== "DIV") return;
     const text = normalizeText(el.textContent);
     if (!text || text.includes("|") || text.includes(":")) return;
