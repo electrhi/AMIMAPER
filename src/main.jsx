@@ -58,7 +58,7 @@ const createPopupScrollableRows = () => {
 
   const rows = document.createElement("div");
   rows.className = "amimap-popup-scroll-rows";
-  rows.style.cssText = "flex:1;min-width:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;scrollbar-width:none;touch-action:pan-y;";
+  rows.style.cssText = "flex:1;min-width:0;max-height:min(260px, max(80px, calc(72dvh - 210px)));overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;scrollbar-width:none;touch-action:pan-y;";
   rows.setAttribute("aria-label", "마커 목록 (위아래로 스크롤)");
   rows.addEventListener("wheel", (event) => event.stopPropagation(), { passive: true });
   rows.addEventListener("touchmove", (event) => event.stopPropagation(), { passive: true });
