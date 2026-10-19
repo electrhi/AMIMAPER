@@ -1967,6 +1967,30 @@ const metersCacheRef = useRef(new Map());
 // ✅ fetch 중복/경합 방지용 시퀀스
 const metersFetchSeqRef = useRef(0);
 
+// 마커 조회/상태 저장 시 users 테이블의 실제 파일 배정을 확인합니다.
+// 파일 배정이 로그인 이후 변경됐다면 오래된 엑셀의 데이터를 잘못 갱신하지 않습니다.
+const getVerifiedAssignedDataFile = async () => {
+  const userId = String(currentUser?.id ?? "").trim();
+  if (!userId) throw new Error("로그인한 사용자 정보가 없습니다.");
+
+  const { data: assignedUser, error } = await supabase
+    .from("users")
+    .select("data_file")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (error) throw error;
+
+  const assignedFile = normalizeAssignedFileValue(assignedUser?.data_file);
+  if (!hasUsableDataFile(assignedFile)) {
+    throw new Error("계정에 할당된 엑셀 파일이 없습니다.");
+  }
+  if (assignedFile !== normalizeAssignedFileValue(currentUser?.data_file)) {
+    throw new Error("할당된 엑셀 파일이 변경되었습니다. 다시 로그인해주세요.");
+  }
+  return assignedFile;
+};
+
 // ✅ meters 상태를 "특정 meterIds"만 DB에서 읽어와서 data에 반영
 const fetchMetersStatusByIds = async (meterIds) => {
   const ids = Array.from(new Set((meterIds || []).map(normalizeMeterId))).filter(Boolean);
@@ -3312,8 +3336,16 @@ const runSearch = () => {
         // 마커 클릭 시 팝업 + 상태 버튼
         const openPopup = async (e) => {
           e.stopPropagation();
-          // ✅ 어떤 마커를 클릭하든 "현재 화면 내 전체"를 최신화
-          await fetchLatestStatus();
+          // ✅ users.data_file 배정값 확인 후 해당 마커에 속한 계기번호만 최신화
+          // meters 조회에도 로그인 계정의 data_file 조건이 적용됩니다.
+          try {
+            await getVerifiedAssignedDataFile();
+            await fetchLatestStatus(list.map((row) => row.meter_id));
+          } catch (err) {
+            debugError("[ERROR][POPUP] 할당 파일 확인 실패:", err.message);
+            alert(`마커 상태를 조회할 수 없습니다: ${err.message}`);
+            return;
+          }
 
           // ✅ 계정별 개인정보 모드: 마커를 열 때 DB 최신 설정을 조회합니다.
           // 조회 실패 시에는 개인정보 표시를 제한하는 쪽으로 동작합니다.
@@ -4159,6 +4191,12 @@ useEffect(() => {
   /** 상태 업데이트 (버튼 클릭 시만 DB 업로드, 상태 흐름: 미방문 > 교체 > 완료 | 불가) **/
   const updateStatus = async (meterIds, newStatus, coords) => {
     try {
+      // users.data_file과 일치하는 로그인 세션에서만 해당 파일의 계기를 갱신합니다.
+      const assignedFile = await getVerifiedAssignedDataFile();
+      const allowedIds = new Set(dataRef.current.map((row) => normalizeMeterId(row.meter_id)));
+      if (meterIds.some((id) => !allowedIds.has(normalizeMeterId(id)))) {
+        throw new Error("할당된 엑셀 파일에 없는 계기번호는 수정할 수 없습니다.");
+      }
       debugLog(
         "[DEBUG][STATUS] 🛠️ 상태 업데이트 시도:",
         meterIds,
@@ -4173,7 +4211,7 @@ useEffect(() => {
             (d) => normalizeMeterId(d.meter_id) === normId
           ) || {};
         return {
-          data_file: currentUser.data_file,   // ✅ 추가
+          data_file: assignedFile,
           meter_id: normId,
           address: row.address || "",
           status: newStatus,
