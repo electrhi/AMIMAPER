@@ -229,18 +229,24 @@ export const amimapCorePerformancePlugin = () => ({
       "cached group iteration"
     );
 
-    code = replaceRequired(
-      code,
-      '          e.stopPropagation();\n          // ✅ 어떤 마커를 클릭하든 "현재 화면 내 전체"를 최신화\n          await fetchLatestStatus();',
-      [
-        '          e.stopPropagation();',
-        '          const popupMeterIds = list.map((row) => normalizeMeterId(row?.meter_id)).filter(Boolean);',
-        '          fetchLatestStatus(popupMeterIds).catch((error) =>',
-        '            debugWarn("[WARN][POPUP] 백그라운드 최신화 실패:", error?.message)',
-        '          );',
-      ].join("\n"),
-      "instant popup targeted sync"
-    );
+    // 마커 클릭 코드가 이미 계정의 data_file 검증 및 해당 마커만 조회하는
+    // 최신 형식이면 기존 동작을 유지합니다. 구형 전체조회 코드만 변환합니다.
+    const verifiedScopedPopup =
+      '            await getVerifiedAssignedDataFile();\n            await fetchLatestStatus(list.map((row) => row.meter_id));';
+    if (!code.includes(verifiedScopedPopup)) {
+      code = replaceRequired(
+        code,
+        '          e.stopPropagation();\n          // ✅ 어떤 마커를 클릭하든 "현재 화면 내 전체"를 최신화\n          await fetchLatestStatus();',
+        [
+          '          e.stopPropagation();',
+          '          const popupMeterIds = list.map((row) => normalizeMeterId(row?.meter_id)).filter(Boolean);',
+          '          fetchLatestStatus(popupMeterIds).catch((error) =>',
+          '            debugWarn("[WARN][POPUP] 백그라운드 최신화 실패:", error?.message)',
+          '          );',
+        ].join("\n"),
+        "instant popup targeted sync"
+      );
+    }
 
     code = replaceRequired(
       code,
