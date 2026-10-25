@@ -7,6 +7,22 @@
     <style>
       /* 모바일/데스크톱 모두 전용 위치 표시기를 사용하므로 기본 스크롤바는 중복 표시하지 않습니다. */
       .amimap-popup-scroll-rows::-webkit-scrollbar { width: 0; height: 0; }
+      /* 필터 패널은 화면 높이를 넘을 때 세로 스크롤 및 전용 스크롤바를 표시합니다. */
+      .amimap-filter-panel-scroll {
+        scrollbar-width: auto;
+        scrollbar-color: #64748b #e2e8f0;
+        scrollbar-gutter: stable;
+      }
+      .amimap-filter-panel-scroll::-webkit-scrollbar { width: 10px; }
+      .amimap-filter-panel-scroll::-webkit-scrollbar-track {
+        background: #e2e8f0;
+        border-radius: 10px;
+      }
+      .amimap-filter-panel-scroll::-webkit-scrollbar-thumb {
+        background: #64748b;
+        border: 2px solid #e2e8f0;
+        border-radius: 10px;
+      }
     </style>
   </head>
   <body>
