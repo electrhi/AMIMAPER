@@ -5127,7 +5127,7 @@ useEffect(() => {
       </div>
 
       <div style={{ marginTop: 10, fontSize: isMobile ? "13px" : "12px", color: "#666" }}>
-        (리스트번호 | 계기번호 | 주소)
+        (인입전산화 | 인입주 | 계기타입 | 통신방식 | 주소)
       </div>
 
       <div
@@ -5161,7 +5161,13 @@ useEffect(() => {
               }}
             >
               <div style={{ flex: 1 }}>
-                {String(r?.list_no ?? "-")} | {String(r?.meter_id ?? "-")} | {pickAddress(r) || "-"}
+                {[
+                  String(r?.inipju_digital ?? "").trim() || "-",
+                  String(r?.inipju ?? "").trim() || "-",
+                  getMeterType(r?.meter_id),
+                  String(r?.comm_type ?? "").trim() || "-",
+                  pickAddress(r) || "-",
+                ].join(" | ")}
               </div>
 
               <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
