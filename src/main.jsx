@@ -4869,11 +4869,13 @@ useEffect(() => {
       display: "flex",
       justifyContent: "center",
       alignItems: "flex-start",
-      paddingTop: 70,
+      padding: "70px 12px 16px",
+      boxSizing: "border-box",
     }}
     onClick={() => setFilterPanelOpen(false)}
   >
     <div
+      className="amimap-filter-panel-scroll"
       style={{
         width: isMobile ? "92vw" : "380px",
         background: "rgba(255,255,255,0.98)",
@@ -4881,6 +4883,12 @@ useEffect(() => {
         boxShadow: "0 2px 12px rgba(0,0,0,0.22)",
         border: "1px solid rgba(0,0,0,0.08)",
         padding: "12px",
+        boxSizing: "border-box",
+        maxHeight: "calc(100dvh - 86px)",
+        overflowY: "scroll",
+        overflowX: "hidden",
+        overscrollBehavior: "contain",
+        WebkitOverflowScrolling: "touch",
       }}
       onClick={(e) => e.stopPropagation()}
     >
