@@ -78,7 +78,7 @@ export const amimapCommLabelModePlugin = () => ({
     // 미좌표 5개 항목 UI가 이미 적용된 경우 덮어쓰지 않습니다.
     // 구형 목록은 기존 플러그인의 표기 변경을 계속 지원합니다.
     const legacyNoCoordHeader = '(리스트번호 | 계기번호 | 주소)';
-    const expandedNoCoordHeader = "(인입전산화 | 인입주 | 계기타입 | 통신방식 | 주소)";
+    const expandedNoCoordHeader = "(인입전산화 | 인입주 | 계기번호 | 계기타입 | 통신방식 | 주소)";
     if (code.includes(legacyNoCoordHeader)) {
       code = replaceRequired(
         code,
@@ -91,7 +91,7 @@ export const amimapCommLabelModePlugin = () => ({
     }
 
     const legacyNoCoordValue = '{String(r?.inipju_digital ?? "-")} | {String(r?.meter_id ?? "-")} | {pickAddress(r) || "-"}';
-    const expandedNoCoordValue = "{[\n                  String(r?.inipju_digital ?? \"\").trim() || \"-\",\n                  String(r?.inipju ?? \"\").trim() || \"-\",\n                  getMeterType(r?.meter_id),\n                  String(r?.comm_type ?? \"\").trim() || \"-\",\n                  pickAddress(r) || \"-\",\n                ].join(\" | \")}";
+    const expandedNoCoordValue = "{[\n                  String(r?.inipju_digital ?? \"\").trim() || \"-\",\n                  String(r?.inipju ?? \"\").trim() || \"-\",\n                  String(r?.meter_id ?? \"\").trim() || \"-\",\n                  getMeterType(r?.meter_id),\n                  String(r?.comm_type ?? \"\").trim() || \"-\",\n                  pickAddress(r) || \"-\",\n                ].join(\" | \")}";
     if (!code.includes(legacyNoCoordValue) && !code.includes(expandedNoCoordValue)) {
       throw new Error("AMIMAPER comm label transform failed: no coordinate inipju digital value");
     }

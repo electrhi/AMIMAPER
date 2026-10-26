@@ -197,7 +197,7 @@ export const amimapPriorityPlugin = () => ({
     // 기존 미좌표 표시는 인입주전산화로 교체하되, 이미 5개 항목으로
     // 개편된 최신 목록은 그대로 보존합니다.
     const legacyNoCoordValue = '{String(r?.list_no ?? "-")} | {String(r?.meter_id ?? "-")} | {pickAddress(r) || "-"}';
-    const modernNoCoordValue = "{[\n                  String(r?.inipju_digital ?? \"\").trim() || \"-\",\n                  String(r?.inipju ?? \"\").trim() || \"-\",\n                  getMeterType(r?.meter_id),\n                  String(r?.comm_type ?? \"\").trim() || \"-\",\n                  pickAddress(r) || \"-\",\n                ].join(\" | \")}";
+    const modernNoCoordValue = "{[\n                  String(r?.inipju_digital ?? \"\").trim() || \"-\",\n                  String(r?.inipju ?? \"\").trim() || \"-\",\n                  String(r?.meter_id ?? \"\").trim() || \"-\",\n                  getMeterType(r?.meter_id),\n                  String(r?.comm_type ?? \"\").trim() || \"-\",\n                  pickAddress(r) || \"-\",\n                ].join(\" | \")}";
     if (code.includes(legacyNoCoordValue)) {
       code = replaceRequired(
         code,
