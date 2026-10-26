@@ -75,17 +75,24 @@ export const amimapCommLabelModePlugin = () => ({
       "communication label content"
     );
 
-    // 미좌표 안내 문구는 실제 표시값(인입주전산화)과 동일하게 맞춤
-    code = replaceRequired(
-      code,
-      '(리스트번호 | 계기번호 | 주소)',
-      '(인입전산화 | 계기번호 | 주소)',
-      "no coordinate header"
-    );
+    // 미좌표 5개 항목 UI가 이미 적용된 경우 덮어쓰지 않습니다.
+    // 구형 목록은 기존 플러그인의 표기 변경을 계속 지원합니다.
+    const legacyNoCoordHeader = '(리스트번호 | 계기번호 | 주소)';
+    const expandedNoCoordHeader = "(인입전산화 | 인입주 | 계기타입 | 통신방식 | 주소)";
+    if (code.includes(legacyNoCoordHeader)) {
+      code = replaceRequired(
+        code,
+        legacyNoCoordHeader,
+        '(인입전산화 | 계기번호 | 주소)',
+        "no coordinate header"
+      );
+    } else if (!code.includes(expandedNoCoordHeader)) {
+      throw new Error("AMIMAPER comm label transform failed: no coordinate header");
+    }
 
-    // 우선순위 플러그인이 실제 첫 값을 인입주전산화로 바꾼 상태인지 빌드 시 확인
-    const noCoordValue = '{String(r?.inipju_digital ?? "-")} | {String(r?.meter_id ?? "-")} | {pickAddress(r) || "-"}';
-    if (!code.includes(noCoordValue)) {
+    const legacyNoCoordValue = '{String(r?.inipju_digital ?? "-")} | {String(r?.meter_id ?? "-")} | {pickAddress(r) || "-"}';
+    const expandedNoCoordValue = "{[\n                  String(r?.inipju_digital ?? \"\").trim() || \"-\",\n                  String(r?.inipju ?? \"\").trim() || \"-\",\n                  getMeterType(r?.meter_id),\n                  String(r?.comm_type ?? \"\").trim() || \"-\",\n                  pickAddress(r) || \"-\",\n                ].join(\" | \")}";
+    if (!code.includes(legacyNoCoordValue) && !code.includes(expandedNoCoordValue)) {
       throw new Error("AMIMAPER comm label transform failed: no coordinate inipju digital value");
     }
 
