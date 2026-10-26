@@ -194,13 +194,20 @@ export const amimapPriorityPlugin = () => ({
       "priority popup address dot"
     );
 
-    // 미좌표 목록의 첫 정보는 리스트번호 대신 Excel의 인입주전산화 값을 표시합니다.
-    code = replaceRequired(
-      code,
-      '{String(r?.list_no ?? "-")} | {String(r?.meter_id ?? "-")} | {pickAddress(r) || "-"}',
-      '{String(r?.inipju_digital ?? "-")} | {String(r?.meter_id ?? "-")} | {pickAddress(r) || "-"}',
-      "no coordinate inipju digital"
-    );
+    // 기존 미좌표 표시는 인입주전산화로 교체하되, 이미 5개 항목으로
+    // 개편된 최신 목록은 그대로 보존합니다.
+    const legacyNoCoordValue = '{String(r?.list_no ?? "-")} | {String(r?.meter_id ?? "-")} | {pickAddress(r) || "-"}';
+    const modernNoCoordValue = "{[\n                  String(r?.inipju_digital ?? \"\").trim() || \"-\",\n                  String(r?.inipju ?? \"\").trim() || \"-\",\n                  getMeterType(r?.meter_id),\n                  String(r?.comm_type ?? \"\").trim() || \"-\",\n                  pickAddress(r) || \"-\",\n                ].join(\" | \")}";
+    if (code.includes(legacyNoCoordValue)) {
+      code = replaceRequired(
+        code,
+        legacyNoCoordValue,
+        '{String(r?.inipju_digital ?? "-")} | {String(r?.meter_id ?? "-")} | {pickAddress(r) || "-"}',
+        "no coordinate inipju digital"
+      );
+    } else if (!code.includes(modernNoCoordValue)) {
+      throw new Error("AMIMAPER priority transform failed: no coordinate list format");
+    }
 
     // 필터 패널에 우선순위 다중 필터를 추가합니다.
     const filterAnchor = [
