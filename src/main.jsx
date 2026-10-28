@@ -4229,32 +4229,9 @@ useEffect(() => {
 
 if (upsertError) throw upsertError;
 
-      // ✅ 2) user_last_locations는 "유저 마지막 위치" (유저당 1행 유지)
-const lastAddress = payload[0]?.address || "";
-
-const { error: lastLocError } = await supabase
-  .from("user_last_locations")
-  .upsert(
-    {
-      data_file: currentUser.data_file,
-      user_id: currentUser.id,
-      address: lastAddress,
-      lat: parseFloat(coords.lat),
-      lng: parseFloat(coords.lng),
-      status: newStatus,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: "data_file,user_id" }
-  )
-  .select("user_id"); // ✅ 응답 최소화
-
-// ✅ 임시 해결: view라서 저장이 실패할 수 있으니, throw 하지 말고 경고만 찍고 계속 진행
-if (lastLocError) {
-  debugWarn(
-    "[WARN][LASTLOC] user_last_locations 저장 실패(무시):",
-    lastLocError.message
-  );
-}
+      // user_last_locations는 meters에서 최근 작업 위치를 계산하는 읽기 전용 VIEW입니다.
+      // 위 meters UPSERT가 완료되면 관리자 위치 조회에도 자동 반영되므로
+      // VIEW에 중복 UPSERT하지 않습니다 (PostgreSQL 55000 방지).
 
 debugLog("[DEBUG][STATUS] ✅ DB 업데이트 완료:", payload);
 
