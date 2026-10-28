@@ -4058,13 +4058,12 @@ const openCustomTextEditor = (position, onSave, initialText = "", onDelete = nul
     closeCustomInputOverlay();
   };
 
-  // ✅ (변경) "좌표/그룹이 바뀌는 순간(layoutVersion)"에만 전체 renderMarkers 실행
+  // 지도 또는 엑셀 데이터가 준비되면 최초 마커를 반드시 그립니다.
+  // 좌표 캐시 매칭이 나중에 완료되면 layoutVersion 변경으로 다시 그립니다.
   useEffect(() => {
-    if (!map || !window.kakao?.maps) return;
-    if (layoutVersion === 0) return; // 아직 좌표 매칭 전
-
-    requestFullRender.current(); // 디바운스로 전체 렌더 요청
-  }, [map, layoutVersion]);
+    if (!map || !window.kakao?.maps || data.length === 0) return;
+    requestFullRender.current();
+  }, [map, layoutVersion, data.length, currentUser?.data_file]);
 
 
   // 🔹 줌 레벨에 따라 주소 라벨 토글
