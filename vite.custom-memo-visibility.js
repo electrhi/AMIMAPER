@@ -19,8 +19,8 @@ export const amimapCustomMemoVisibilityPlugin = () => ({
     // 최초 생성/갱신된 메모는 주소 ON인 경우에만 지도에 올립니다.
     code = replaceOnce(
       code,
-      "       if (text) label.setMap(map);",
-      "       if (text && showAddressLabels) label.setMap(map);",
+      "      if (text) label.setMap(map);",
+      "      if (text && showAddressLabels) label.setMap(map);",
       "custom marker initial memo visibility"
     );
 
