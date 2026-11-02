@@ -15,6 +15,8 @@ import { amimapAdminCurrentLocationPlugin } from "./vite.admin-current-location.
 import { amimapMapTypeLabelPlugin } from "./vite.map-type-label.js";
 import { amimapTopActionsLayoutPlugin } from "./vite.top-actions-layout.js";
 import { amimapCommLabelModePlugin } from "./vite.comm-label-mode.js";
+import { amimapMeterTypeCommFiltersPlugin } from "./vite.meter-type-comm-filters.js";
+import { amimapCustomMemoVisibilityPlugin } from "./vite.custom-memo-visibility.js";
 
 const inheritedPlugins = Array.isArray(baseConfig?.plugins) ? baseConfig.plugins : [];
 
@@ -37,5 +39,7 @@ export default defineConfig({
     amimapMapTypeLabelPlugin(),
     amimapTopActionsLayoutPlugin(),
     amimapCommLabelModePlugin(),
+    amimapMeterTypeCommFiltersPlugin(),
+    amimapCustomMemoVisibilityPlugin(),
   ],
 });
