@@ -185,14 +185,13 @@ export const amimapMeterTypeCommFiltersPlugin = () => ({
                       </span>
                     ) : (
                       options.map((commType) => {
-                        const checked = selected.length === 0 || selected.includes(commType);
+                        const checked = selected.includes(commType);
                         const toggle = () => {
                           setCommTypeFilters((prev) => {
                             const previous = Array.isArray(prev?.[meterType]) ? prev[meterType] : [];
-                            const base = previous.length === 0 ? [...options] : [...previous];
-                            const next = base.includes(commType)
-                              ? base.filter((value) => value !== commType)
-                              : [...base, commType];
+                            const next = previous.includes(commType)
+                              ? previous.filter((value) => value !== commType)
+                              : [...previous, commType];
                             return { ...prev, [meterType]: next };
                           });
                         };
