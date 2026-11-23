@@ -41,7 +41,7 @@ const normalizeMeterId = (id) =>
     .replace(/[\s\u00A0\u200B-\u200D\uFEFF]/g, "")
     .trim();
 
-// ✅ 지도 팝업 개인정보 표시용. 원본 계기번호는 상태 갱신 등 내부 처리에만 사용합니다.
+// ✅ 지도 팝업 개인정보 표시용. 원본 계기번호는 상태 갱신 및 클릭 복사에 사용합니다.
 const maskPopupMeterId = (meterId) => {
   const id = normalizeMeterId(meterId);
   if (!id) return "";
@@ -3542,7 +3542,7 @@ const runSearch = () => {
               div.style.cursor = "pointer";
               div.style.userSelect = "none";
               div.title = popupPrivacyOn
-                ? "클릭 시 마스킹된 계기번호 복사"
+                ? "클릭 시 전체 계기번호 복사"
                 : "클릭 시 계기번호 복사";
               div.dataset.selected = "0";
 
@@ -3569,7 +3569,7 @@ const runSearch = () => {
                 applySelectedStyle(nextOn);
 
                 // ✅ 2) 복사
-                const meterIdToCopy = displayMeterId;
+                const meterIdToCopy = id;
 
                 if (navigator.clipboard && navigator.clipboard.writeText) {
                   navigator.clipboard.writeText(meterIdToCopy).catch((err) => {
