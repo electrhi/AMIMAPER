@@ -1991,6 +1991,36 @@ const getVerifiedAssignedDataFile = async () => {
   return assignedFile;
 };
 
+
+const METER_STATUS_PAGE_SIZE = 1000;
+const METER_FILE_QUERY_THRESHOLD = 200;
+
+// data_file 기준 상태를 id 키셋 페이지로 읽어 긴 meter_id IN URL을 피합니다.
+const fetchMeterStatusRowsForFile = async (dataFile) => {
+  const rows = [];
+  let lastId = null;
+  while (true) {
+    let query = supabase
+      .from("meters")
+      .select("id,meter_id,status,updated_at")
+      .eq("data_file", dataFile)
+      .order("id", { ascending: true })
+      .limit(METER_STATUS_PAGE_SIZE);
+    if (lastId !== null) query = query.gt("id", lastId);
+
+    const { data: page, error } = await query;
+    if (error) throw error;
+    if (!page || page.length === 0) break;
+
+    rows.push(...page);
+    const nextId = page[page.length - 1].id;
+    if (nextId === lastId) throw new Error("계기 상태 페이지 조회가 진행되지 않았습니다.");
+    lastId = nextId;
+    if (page.length < METER_STATUS_PAGE_SIZE) break;
+  }
+  return rows;
+};
+
 // ✅ meters 상태를 "특정 meterIds"만 DB에서 읽어와서 data에 반영
 const fetchMetersStatusByIds = async (meterIds) => {
   const ids = Array.from(new Set((meterIds || []).map(normalizeMeterId))).filter(Boolean);
@@ -2005,20 +2035,30 @@ const fetchMetersStatusByIds = async (meterIds) => {
   const columns = "meter_id,status,updated_at";
 
   let rows = [];
-  for (const part of chunkArray(ids, 500)) {
-if (!dataFile) return;
-
-const { data: chunkRows, error } = await supabase
-  .from("meters")
-  .select(columns)
-  .eq("data_file", dataFile)
-  .in("meter_id", part);
-
-    if (error) {
-      debugError("[ERROR][FETCH] meters:", error.message);
+  if (ids.length >= METER_FILE_QUERY_THRESHOLD) {
+    try {
+      const allowedIds = new Set(ids);
+      rows = (await fetchMeterStatusRowsForFile(dataFile)).filter(
+        (row) => allowedIds.has(normalizeMeterId(row.meter_id))
+      );
+    } catch (error) {
+      debugError("[ERROR][FETCH] meters by file:", error.message);
       return;
     }
-    rows = rows.concat(chunkRows || []);
+  } else {
+    // 마커 클릭 등의 소량 계기 조회는 기존 방식 유지
+    for (const part of chunkArray(ids, 500)) {
+      const { data: chunkRows, error } = await supabase
+        .from("meters")
+        .select(columns)
+        .eq("data_file", dataFile)
+        .in("meter_id", part);
+      if (error) {
+        debugError("[ERROR][FETCH] meters:", error.message);
+        return;
+      }
+      rows = rows.concat(chunkRows || []);
+    }
   }
 
   // 더 최신 요청이 이미 시작됐으면 이번 결과는 버림
@@ -2030,6 +2070,16 @@ const { data: chunkRows, error } = await supabase
     const id = normalizeMeterId(r.meter_id);
     const prev = latest.get(id);
     if (!prev || new Date(r.updated_at) > new Date(prev.updated_at)) latest.set(id, r);
+  }
+
+  // 조회 중 들어온 더 최신 Realtime 상태는 오래된 DB 응답으로 덮지 않습니다.
+  for (const [id, row] of latest.entries()) {
+    const cached = metersCacheRef.current.get(id);
+    const cachedAt = Date.parse(cached?.updated_at);
+    const fetchedAt = Date.parse(row?.updated_at);
+    if (cached && Number.isFinite(cachedAt) && Number.isFinite(fetchedAt) && cachedAt > fetchedAt) {
+      latest.set(id, cached);
+    }
   }
 
   // 캐시 업데이트
@@ -2257,21 +2307,10 @@ const { data: chunkRows, error } = await supabase
 
 
       // ✅ 2) DB에서 최신 상태를 "엑셀에 있는 meter_id들만" 읽어오기 (전체 select(*) 금지)
-const excelIds = baseData.map((x) => normalizeMeterId(x.meter_id)).filter(Boolean);
-
-const columns = "meter_id,status,updated_at";
-let rows = [];
-for (const part of chunkArray(excelIds, 500)) {
-  const { data: chunkRows, error } = await supabase
-  .from("meters")
-  .select(columns)
-  .eq("data_file", fileName)
-  .in("meter_id", part);
-
-
-  if (error) throw error;
-  rows = rows.concat(chunkRows || []);
-}
+const excelIds = new Set(baseData.map((x) => normalizeMeterId(x.meter_id)).filter(Boolean));
+const rows = (await fetchMeterStatusRowsForFile(fileName)).filter(
+  (row) => excelIds.has(normalizeMeterId(row.meter_id))
+);
 
 const latestMap = {};
 rows.forEach((d) => {
